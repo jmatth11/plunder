@@ -7,6 +7,10 @@ const MAP_FILE: []const u8 = "/proc/%lu/maps";
 /// Process memory file path.
 const MEM_FILE: []const u8 = "/proc/%lu/mem";
 
+pub const Errors = error {
+    malformed_permissions,
+};
+
 pub const Permissions = enum(u8) {
     read = 1,
     write = 1 << 1,
@@ -44,6 +48,19 @@ pub const Info = struct {
         return (self.perm & Permissions.shared) == Permissions.shared;
     }
 
+    pub fn set_read(self: *Info) void {
+        self.perm = self.perm | Permissions.read;
+    }
+    pub fn set_write(self: *Info) void {
+        self.perm = self.perm | Permissions.write;
+    }
+    pub fn set_execute(self: *Info) void {
+        self.perm = self.perm | Permissions.execute;
+    }
+    pub fn set_shared(self: *Info) void {
+        self.perm = self.perm | Permissions.shared;
+    }
+
     pub fn deinit(self: *Info) void {
         if (self.pathname) |name| {
             // if not undefined_name it's custom, so we need to free.
@@ -73,9 +90,9 @@ const ParseStep = enum(u8) {
     done = 12,
 };
 const ParseResult = struct {
-    step: ParseStep,
-    info: ?Info,
-    bytes_read: usize,
+    step: ParseStep = .nothing,
+    info: ?Info = null,
+    bytes_read: usize = 0,
 };
 const ParseInfo = struct {
     alloc: std.mem.Allocator,
@@ -91,19 +108,80 @@ const ParseInfo = struct {
         return result;
     }
 
-    pub fn parse(self: *ParseInfo, buffer: []const u8, offset: usize) ParseStep {
-        var idx: usize = 0;
+    pub fn parse(self: *ParseInfo, buffer: []const u8, offset: usize) ParseResult {
+        var idx: usize = offset;
         while (idx < buffer.len) {
             switch (self.current_step) {
                 ParseStep.nothing => self.current_step = .start_addr,
-                ParseStep.start_addr => {},
-                ParseStep.end_addr => {},
-                ParseStep.end_addr => {},
-                ParseStep.perm_read => {},
-                ParseStep.perm_write => {},
-                ParseStep.perm_execute => {},
-                ParseStep.perm_shared => {},
-                ParseStep.offset => {},
+                ParseStep.start_addr => {
+                    const res = self.parse_addr(buffer, idx, .end_addr);
+                    if (res.step == .end_addr) {
+                        self.current_info.start_addr = try std.fmt.parseInt(
+                            u8,
+                            self.working_buffer[0..self.working_buffer_n],
+                            16
+                        );
+                    }
+                    idx += res.bytes_read;
+                    self.current_step = res.step;
+                },
+                ParseStep.end_addr => {
+                    const res = self.parse_addr(buffer, idx, .perm_read);
+                    if (res.step == .perm_read) {
+                        self.current_info.end_addr = try std.fmt.parseInt(
+                            u8,
+                            self.working_buffer[0..self.working_buffer_n],
+                            16
+                        );
+                    }
+                    idx += res.bytes_read;
+                    self.current_step = res.step;
+                },
+                ParseStep.perm_read => {
+                    const res = try ParseInfo.parse_permission(buffer, idx, 'r');
+                    if (res) {
+                        self.current_info.set_read();
+                    }
+                    idx += 1;
+                    self.current_step = .perm_write;
+                },
+                ParseStep.perm_write => {
+                    const res = try ParseInfo.parse_permission(buffer, idx, 'w');
+                    if (res) {
+                        self.current_info.set_write();
+                    }
+                    idx += 1;
+                    self.current_step = .perm_execute;
+                },
+                ParseStep.perm_execute => {
+                    const res = try ParseInfo.parse_permission(buffer, idx, 'x');
+                    if (res) {
+                        self.current_info.set_execute();
+                    }
+                    idx += 1;
+                    self.current_step = .perm_shared;
+            },
+                ParseStep.perm_shared => {
+                    const res = try ParseInfo.parse_permission(buffer, idx, 's');
+                    if (res) {
+                        self.current_info.set_shared();
+                    }
+                    // skip 2 to skip next whitespace.
+                    idx += 2;
+                    self.current_step = .offset;
+            },
+                ParseStep.offset => {
+                    const res = self.parse_addr(buffer, idx, .dev_major);
+                    if (res.step == .dev_major) {
+                        self.current_info.offset = try std.fmt.parseInt(
+                            u8,
+                            self.working_buffer[0..self.working_buffer_n],
+                            16
+                        );
+                    }
+                    idx += res.bytes_read;
+                    self.current_step = res.step;
+                },
                 ParseStep.dev_major => {},
                 ParseStep.dev_minor => {},
                 ParseStep.inode => {},
@@ -118,6 +196,36 @@ const ParseInfo = struct {
             return self.current_info;
         }
         return null;
+    }
+
+    fn parse_addr(self: *ParseInfo, buffer: []const u8, offset: usize, next_step: ParseStep) ParseResult {
+        var result: ParseResult = .{.step = self.current_step};
+        var idx: usize = offset;
+        self.working_buffer_n = 0;
+        while (idx < buffer.len) : (idx += 1) {
+            if (std.ascii.isAlphanumeric(buffer[idx])) {
+                self.working_buffer[self.working_buffer_n] = buffer[idx];
+                self.working_buffer_n += 1;
+            } else {
+                result.step = next_step;
+                break;
+            }
+        }
+        result.bytes_read = idx;
+        // add one extra if we completed the parse to move past the hyphen char.
+        if (result.step == next_step) {
+            result.bytes_read += 1;
+        }
+        return result;
+    }
+
+    fn parse_permission(buffer: []const u8, offset: usize, compare_char: u8) Errors!bool {
+        if (buffer[offset] == compare_char) {
+            return true;
+        } else if (buffer[offset] != '-' and buffer[offset] != 'p') {
+             return Errors.malformed_permissions;
+        }
+        return false;
     }
 };
 
