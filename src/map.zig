@@ -7,7 +7,7 @@ const MAP_FILE: []const u8 = "/proc/%lu/maps";
 /// Process memory file path.
 const MEM_FILE: []const u8 = "/proc/%lu/mem";
 
-pub const Errors = error {
+pub const Errors = error{
     malformed_permissions,
 };
 
@@ -109,30 +109,37 @@ const ParseInfo = struct {
     }
 
     pub fn parse(self: *ParseInfo, buffer: []const u8, offset: usize) ParseResult {
+        var result: ParseResult = .{};
         var idx: usize = offset;
-        while (idx < buffer.len) {
+        while (idx < buffer.len or self.current_step == .done) {
             switch (self.current_step) {
-                ParseStep.nothing => self.current_step = .start_addr,
+                ParseStep.nothing => {
+                    self.current_step = .start_addr;
+                    self.current_info = Info.init(self.alloc);
+                    self.working_buffer_n = 0;
+                },
                 ParseStep.start_addr => {
-                    const res = self.parse_addr(buffer, idx, .end_addr);
+                    const res = self.parse_hex(buffer, idx, .end_addr);
                     if (res.step == .end_addr) {
                         self.current_info.start_addr = try std.fmt.parseInt(
                             u8,
                             self.working_buffer[0..self.working_buffer_n],
-                            16
+                            16,
                         );
+                        self.working_buffer_n = 0;
                     }
                     idx += res.bytes_read;
                     self.current_step = res.step;
                 },
                 ParseStep.end_addr => {
-                    const res = self.parse_addr(buffer, idx, .perm_read);
+                    const res = self.parse_hex(buffer, idx, .perm_read);
                     if (res.step == .perm_read) {
                         self.current_info.end_addr = try std.fmt.parseInt(
                             u8,
                             self.working_buffer[0..self.working_buffer_n],
-                            16
+                            16,
                         );
+                        self.working_buffer_n = 0;
                     }
                     idx += res.bytes_read;
                     self.current_step = res.step;
@@ -160,7 +167,7 @@ const ParseInfo = struct {
                     }
                     idx += 1;
                     self.current_step = .perm_shared;
-            },
+                },
                 ParseStep.perm_shared => {
                     const res = try ParseInfo.parse_permission(buffer, idx, 's');
                     if (res) {
@@ -169,26 +176,87 @@ const ParseInfo = struct {
                     // skip 2 to skip next whitespace.
                     idx += 2;
                     self.current_step = .offset;
-            },
+                },
                 ParseStep.offset => {
-                    const res = self.parse_addr(buffer, idx, .dev_major);
+                    const res = self.parse_hex(buffer, idx, .dev_major);
                     if (res.step == .dev_major) {
                         self.current_info.offset = try std.fmt.parseInt(
                             u8,
                             self.working_buffer[0..self.working_buffer_n],
-                            16
+                            16,
                         );
+                        self.working_buffer_n = 0;
                     }
                     idx += res.bytes_read;
                     self.current_step = res.step;
                 },
-                ParseStep.dev_major => {},
-                ParseStep.dev_minor => {},
-                ParseStep.inode => {},
-                ParseStep.process => {},
-                ParseStep.done => {},
+                ParseStep.dev_major => {
+                    const res = self.parse_hex(buffer, idx, .dev_minor);
+                    if (res.step == .dev_minor) {
+                        self.current_info.dev_major = try std.fmt.parseInt(
+                            u8,
+                            self.working_buffer[0..self.working_buffer_n],
+                            16,
+                        );
+                        self.working_buffer_n = 0;
+                    }
+                    idx += res.bytes_read;
+                    self.current_step = res.step;
+                },
+                ParseStep.dev_minor => {
+                    const res = self.parse_hex(buffer, idx, .inode);
+                    if (res.step == .inode) {
+                        self.current_info.dev_minor = try std.fmt.parseInt(
+                            u8,
+                            self.working_buffer[0..self.working_buffer_n],
+                            16,
+                        );
+                        self.working_buffer_n = 0;
+                    }
+                    idx += res.bytes_read;
+                    self.current_step = res.step;
+                },
+                ParseStep.inode => {
+                    const res = self.parse_number(buffer, idx, .process);
+                    if (res.step == .process) {
+                        self.current_info.inode = try std.fmt.parseInt(
+                            u8,
+                            self.working_buffer[0..self.working_buffer_n],
+                            10,
+                        );
+                        self.working_buffer_n = 0;
+                    }
+                    idx += res.bytes_read;
+                    // sometimes inode can be the last value.
+                    if (idx >= buffer.len and buffer[idx - 1] == '\n') {
+                        self.current_step = .done;
+                    } else {
+                        self.current_step = res.step;
+                    }
+                },
+                ParseStep.process => {
+                    const res = self.parse_path(buffer, idx, .done);
+                    if (res.step == .done) {
+                        self.current_info.pathname = self.alloc.dupe(
+                            u8,
+                            self.working_buffer[0..self.working_buffer_n],
+                        );
+                        self.working_buffer_n = 0;
+                    }
+                    idx += res.bytes_read;
+                    self.current_step = res.step;
+                },
+                ParseStep.done => {
+                    result.step = .done;
+                    result.info = self.current_info;
+                    self.current_step = .nothing;
+                },
             }
         }
+        if (result.step != .done) {
+            result.step = self.current_step;
+        }
+        return result;
     }
 
     pub fn getInfo(self: *ParseInfo) ?Info {
@@ -198,8 +266,49 @@ const ParseInfo = struct {
         return null;
     }
 
-    fn parse_addr(self: *ParseInfo, buffer: []const u8, offset: usize, next_step: ParseStep) ParseResult {
-        var result: ParseResult = .{.step = self.current_step};
+    fn parse_path(self: *ParseInfo, buffer: []const u8, offset: usize, next_step: ParseStep) ParseResult {
+        var result: ParseResult = .{ .step = self.current_step };
+        var idx: usize = offset;
+        while (idx < buffer.len) : (idx += 1) {
+            // TODO maybe need to change for unicode support.
+            if (!std.ascii.isWhitespace(buffer[idx])) {
+                self.working_buffer[self.working_buffer_n] = buffer[idx];
+                self.working_buffer_n += 1;
+            } else {
+                result.step = next_step;
+                break;
+            }
+        }
+        result.bytes_read = idx;
+        // add one extra if we completed the parse to move past the hyphen char.
+        if (result.step == next_step) {
+            result.bytes_read += 1;
+        }
+        return result;
+    }
+
+    fn parse_number(self: *ParseInfo, buffer: []const u8, offset: usize, next_step: ParseStep) ParseResult {
+        var result: ParseResult = .{ .step = self.current_step };
+        var idx: usize = offset;
+        while (idx < buffer.len) : (idx += 1) {
+            if (std.ascii.isDigit(buffer[idx])) {
+                self.working_buffer[self.working_buffer_n] = buffer[idx];
+                self.working_buffer_n += 1;
+            } else {
+                result.step = next_step;
+                break;
+            }
+        }
+        result.bytes_read = idx;
+        // add one extra if we completed the parse to move past the hyphen char.
+        if (result.step == next_step) {
+            result.bytes_read += 1;
+        }
+        return result;
+    }
+
+    fn parse_hex(self: *ParseInfo, buffer: []const u8, offset: usize, next_step: ParseStep) ParseResult {
+        var result: ParseResult = .{ .step = self.current_step };
         var idx: usize = offset;
         self.working_buffer_n = 0;
         while (idx < buffer.len) : (idx += 1) {
@@ -223,7 +332,7 @@ const ParseInfo = struct {
         if (buffer[offset] == compare_char) {
             return true;
         } else if (buffer[offset] != '-' and buffer[offset] != 'p') {
-             return Errors.malformed_permissions;
+            return Errors.malformed_permissions;
         }
         return false;
     }
@@ -251,11 +360,9 @@ pub const Manager = struct {
         defer mem_file.close();
         const buffer: [1024]u8 = undefined;
         var read_n: usize = try mem_file.read(buffer);
-        while(read_n > 0) {
+        while (read_n > 0) {
             var idx: usize = 0;
-            while (idx < read_n) {
-
-            }
+            while (idx < read_n) {}
             read_n = try mem_file.read(buffer);
         }
     }
