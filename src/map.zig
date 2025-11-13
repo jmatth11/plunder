@@ -235,6 +235,7 @@ const ParseInfo = struct {
                     }
                 },
                 ParseStep.process => {
+                    // TODO might need to figure out a strategy to flush last path
                     const res = self.parse_path(buffer, idx, .done);
                     if (res.step == .done) {
                         self.current_info.pathname = self.alloc.dupe(
