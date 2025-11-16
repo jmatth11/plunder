@@ -13,6 +13,8 @@ pub const Errors = error{
     malformed_permissions,
 };
 
+pub const StringList = std.array_list.Managed([]const u8);
+
 /// Permission values for memory map.
 pub const Permissions = enum(u8) {
     read = 1,
@@ -150,6 +152,7 @@ const ParseInfo = struct {
         var result: ParseResult = .{};
         var idx: usize = offset;
         while (idx < buffer.len or self.current_step == .done) {
+            var done: bool = false;
             switch (self.current_step) {
                 ParseStep.nothing => {
                     self.current_step = .start_addr;
@@ -288,10 +291,14 @@ const ParseInfo = struct {
                     self.current_step = res.step;
                 },
                 ParseStep.done => {
+                    done = true;
                     result.step = .done;
                     result.info = self.current_info;
                     self.current_step = .nothing;
                 },
+            }
+            if (done) {
+                break;
             }
         }
         if (result.step != .done) {
@@ -310,8 +317,19 @@ const ParseInfo = struct {
             self.working_buffer_n = 0;
             self.current_step = .nothing;
             return self.current_info;
+        } else if (self.current_step == .inode) {
+            // if we flush on .inode it's an unamed mapping
+            self.current_info.pathname = UNDEFINED_NAME;
+            self.working_buffer_n = 0;
+            self.current_step = .nothing;
+            return self.current_info;
         }
         return null;
+    }
+
+    pub fn reset_state(self: *ParseInfo) void {
+        self.current_step = .nothing;
+        self.working_buffer_n = 0;
     }
 
     pub fn getInfo(self: *ParseInfo) ?Info {
@@ -407,8 +425,8 @@ const ParseInfo = struct {
 pub const Manager = struct {
     alloc: std.mem.Allocator,
     collection: InfoHash,
-    pid: ?usize,
-    map_filename: []const u8,
+    pid: ?usize = null,
+    map_filename: []const u8 = undefined,
     parser: ParseInfo = undefined,
 
     /// Initialize manager with allocator.
@@ -421,6 +439,49 @@ pub const Manager = struct {
         return result;
     }
 
+    /// Load mapped memory info from a given buffer into the manager.
+    ///
+    /// Set the flush flag to true if you are at the end of your memory mapped
+    /// data. Otherwise this value should be false.
+    pub fn load_from_buffer(self: *Manager, buffer: []const u8, offset: usize, flush: bool) !usize {
+        var idx: usize = offset;
+        while (idx < buffer.len) {
+            const res = try self.parser.parse(buffer, idx);
+            if (res.step == .done) {
+                if (res.info) |info_var| {
+                    try self.add_entry(info_var);
+                } else {
+                    unreachable;
+                }
+            }
+            idx += res.bytes_read;
+        }
+        if (flush) {
+            const info_op = try self.parser.flush_last();
+            if (info_op) |info_var| {
+                try self.add_entry(info_var);
+            }
+        }
+        return idx - offset;
+    }
+
+    /// Get the list of region names of mapped memory.
+    /// User is responsible for managing the returned resources.
+    pub fn get_region_names(self: *Manager, alloc: std.mem.Allocator) !StringList {
+        var kit = self.collection.keyIterator();
+        var result: StringList = .init(alloc);
+        while (kit.next()) |key| {
+            const key_val = try alloc.dupe(u8, key);
+            try result.append(key_val);
+        }
+        return result;
+    }
+
+    /// Get the all the region info for the given region name.
+    pub fn get_region(self: *Manager, key: []const u8) !?InfoList {
+        return self.collection.get(key);
+    }
+
     /// Load the memory mapped info for the given process ID.
     pub fn load(self: *Manager, pid: usize) !void {
         errdefer self.clear_pid();
@@ -431,29 +492,28 @@ pub const Manager = struct {
         const buffer: [1024]u8 = undefined;
         var read_n: usize = try mem_file.read(buffer);
         while (read_n > 0) {
-            var idx: usize = 0;
-            while (idx < read_n) {
-                const res = self.parser.parse(buffer, idx);
-                if (res.step == .done) {
-                    if (res.info) |info_var| {
-                        try self.add_entry(info_var);
-                    } else {
-                        unreachable;
-                    }
-                }
-                idx += res.bytes_read;
-            }
+            _ = try self.load_from_buffer(buffer[0..read_n], 0, false);
             read_n = try mem_file.read(buffer);
+        }
+        // the parser uses a newline to know the ending of a line
+        // so in the case of the last entry not having a newline
+        // we call the parser's flush_last function which will give us
+        // the last entry if it meets the right conditions to be a valid
+        // memory map entry, otherwise it returns null.
+        const info_op = try self.parser.flush_last();
+        if (info_op) |info_var| {
+            try self.add_entry(info_var);
         }
     }
 
     /// Deinitialize internals.
     pub fn deinit(self: *Manager) void {
         self.clear_pid();
+        self.clear_collection();
         self.collection.deinit();
     }
 
-    fn add_entry(self: *Manager, info: *Info) !void {
+    fn add_entry(self: *Manager, info: Info) !void {
         var key: []const u8 = undefined;
         if (info.pathname) |pathname| {
             key = pathname;
@@ -463,7 +523,7 @@ pub const Manager = struct {
         }
         const arr_op = self.collection.getPtr(key);
         if (arr_op) |arr| {
-            try arr.append(info.*);
+            try arr.append(info);
         } else {
             var arr: InfoList = .init(self.alloc);
             try arr.append(info);
@@ -475,21 +535,16 @@ pub const Manager = struct {
         if (self.pid != null) {
             self.alloc.free(self.map_filename);
             self.pid = null;
-            self.clear_collection();
         }
     }
 
     fn clear_collection(self: *Manager) void {
-        const vit = self.collection.valueIterator();
+        var vit = self.collection.valueIterator();
         while (vit.next()) |value| {
-            for (value.items) |entry| {
-                entry.deinit();
+            for (value.items) |*entry| {
+                entry.*.deinit();
             }
             value.*.deinit();
-        }
-        const kit = self.collection.keyIterator();
-        while (kit.next()) |key| {
-            self.alloc.free(key.*);
         }
         self.collection.clearRetainingCapacity();
     }
@@ -629,4 +684,24 @@ test "parse partial line" {
     try testing.expectEqual(value.len, result.bytes_read);
     const empty = try parser.flush_last();
     try testing.expect(empty == null);
+}
+
+test "Manager parse all entries" {
+    var manager: Manager = .init(testing.allocator);
+    defer manager.deinit();
+
+    const buffer: []const u8 =
+        \\5a4b2d4fd000-5a4b2d4fe000 r--p 00000000 08:30 432226                     /home/user/main
+        \\5a4b3200b000-5a4b3202c000 rw-p 00000000 00:00 0                          [heap]
+        \\7a837500e000-7a8375039000 r-xs 00001000 00:00 0
+    ;
+
+    const n = try manager.load_from_buffer(buffer, 0, true);
+
+    try testing.expectEqual(buffer.len, n);
+    try testing.expect(manager.collection.get("/home/user/main") != null);
+    try testing.expect(manager.collection.get("[heap]") != null);
+    try testing.expect(manager.collection.get(UNDEFINED_NAME) != null);
+    try testing.expect(manager.collection.get("does not exist") == null);
+    // TODO test grabbing entries
 }
