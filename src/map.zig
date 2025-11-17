@@ -1,11 +1,9 @@
 const std = @import("std");
 
 /// Undefined name for empty name maps
-const UNDEFINED_NAME: []const u8 = "undefined";
+pub const UNDEFINED_NAME: []const u8 = "undefined";
 /// Process memory mapping file path.
 const MAP_FILE: []const u8 = "/proc/%lu/maps";
-/// Process memory file path.
-const MEM_FILE: []const u8 = "/proc/%lu/mem";
 
 /// Errors related to Map manager.
 pub const Errors = error{
@@ -63,6 +61,20 @@ pub const Info = struct {
         var result: Info = .{};
         result.alloc = alloc;
         return result;
+    }
+
+    pub fn dupe(self: *Info, alloc: std.mem.Allocator) !Info {
+        return .{
+            .alloc = alloc,
+            .pathname = try alloc.dupe(u8, self.pathname),
+            .start_addr = self.start_addr,
+            .end_addr = self.end_addr,
+            .perm = self.perm,
+            .offset = self.offset,
+            .dev_major = self.dev_major,
+            .dev_minor = self.dev_minor,
+            .inode = self.inode,
+        };
     }
 
     /// Check if the read permission is set.
@@ -465,25 +477,12 @@ pub const Manager = struct {
         return idx - offset;
     }
 
-    /// Get the list of region names of mapped memory.
-    /// User is responsible for managing the returned resources.
-    pub fn get_region_names(self: *Manager, alloc: std.mem.Allocator) !StringList {
-        var kit = self.collection.keyIterator();
-        var result: StringList = .init(alloc);
-        while (kit.next()) |key| {
-            const key_val = try alloc.dupe(u8, key);
-            try result.append(key_val);
-        }
-        return result;
-    }
-
-    /// Get the all the region info for the given region name.
-    pub fn get_region(self: *Manager, key: []const u8) !?InfoList {
-        return self.collection.get(key);
-    }
-
     /// Load the memory mapped info for the given process ID.
     pub fn load(self: *Manager, pid: usize) !void {
+        if (self.pid != null) {
+            self.clear_pid();
+            self.clear_collection();
+        }
         errdefer self.clear_pid();
         self.map_filename = try std.fmt.allocPrint(self.alloc, MAP_FILE, .{pid});
         self.pid = pid;
@@ -504,6 +503,26 @@ pub const Manager = struct {
         if (info_op) |info_var| {
             try self.add_entry(info_var);
         }
+    }
+
+    /// Get the list of region names of mapped memory.
+    /// User is responsible for managing the returned resources.
+    pub fn get_region_names(self: *Manager, alloc: std.mem.Allocator) !?StringList {
+        var kit = self.collection.keyIterator();
+        if (kit.len == 0) {
+            return null;
+        }
+        var result: StringList = .init(alloc);
+        while (kit.next()) |key| {
+            const key_val = try alloc.dupe(u8, key);
+            try result.append(key_val);
+        }
+        return result;
+    }
+
+    /// Get the all the region info for the given region name.
+    pub fn get_region(self: *Manager, key: []const u8) !?InfoList {
+        return self.collection.get(key);
     }
 
     /// Deinitialize internals.
