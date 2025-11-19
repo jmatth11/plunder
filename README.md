@@ -17,7 +17,7 @@ pub fn main() !void {
     const alloc = std.heap.smp_allocator;
 
     // initialize plunder lib.
-    var pl: plunder.mem.Plunder = .init(alloc);
+    var pl: plunder.Plunder = .init(alloc);
     defer pl.deinit();
 
     // load mapping info for process ID.
