@@ -3,7 +3,7 @@ const std = @import("std");
 /// Undefined name for empty name maps
 pub const UNDEFINED_NAME: []const u8 = "undefined";
 /// Process memory mapping file path.
-const MAP_FILE: []const u8 = "/proc/%lu/maps";
+const MAP_FILE: []const u8 = "/proc/{}/maps";
 
 /// Errors related to Map manager.
 pub const Errors = error{
@@ -63,10 +63,14 @@ pub const Info = struct {
         return result;
     }
 
-    pub fn dupe(self: *Info, alloc: std.mem.Allocator) !Info {
+    pub fn dupe(self: *const Info, alloc: std.mem.Allocator) !Info {
+        var local_pathname: ?[]const u8 = null;
+        if (self.pathname) |name| {
+            local_pathname = try alloc.dupe(u8, name);
+        }
         return .{
             .alloc = alloc,
-            .pathname = try alloc.dupe(u8, self.pathname),
+            .pathname = local_pathname,
             .start_addr = self.start_addr,
             .end_addr = self.end_addr,
             .perm = self.perm,
@@ -78,19 +82,19 @@ pub const Info = struct {
     }
 
     /// Check if the read permission is set.
-    pub fn is_read(self: *Info) bool {
+    pub fn is_read(self: *const Info) bool {
         return Permissions.read.check_perm(self.perm);
     }
     /// Check if the write permission is set.
-    pub fn is_write(self: *Info) bool {
+    pub fn is_write(self: *const Info) bool {
         return Permissions.write.check_perm(self.perm);
     }
     /// Check if the execute permission is set.
-    pub fn is_execute(self: *Info) bool {
+    pub fn is_execute(self: *const Info) bool {
         return Permissions.execute.check_perm(self.perm);
     }
     /// Check if the shared permission is set.
-    pub fn is_shared(self: *Info) bool {
+    pub fn is_shared(self: *const Info) bool {
         return Permissions.shared.check_perm(self.perm);
     }
 
@@ -281,7 +285,7 @@ const ParseInfo = struct {
                     }
                     idx += res.bytes_read;
                     // sometimes inode can be the last value.
-                    if (idx >= buffer.len and buffer[buffer.len - 1] == '\n') {
+                    if ((idx >= buffer.len and buffer[buffer.len - 1] == '\n')) {
                         self.current_step = .done;
                         self.current_info.pathname = UNDEFINED_NAME;
                     } else {
@@ -289,18 +293,23 @@ const ParseInfo = struct {
                     }
                 },
                 ParseStep.process => {
-                    // TODO might need to figure out a strategy to flush last path
-                    idx += ParseInfo.skip_whitespace(buffer, idx);
-                    const res = self.parse_path(buffer, idx, .done);
-                    if (res.step == .done) {
-                        self.current_info.pathname = try self.alloc.dupe(
-                            u8,
-                            self.working_buffer[0..self.working_buffer_n],
-                        );
-                        self.working_buffer_n = 0;
+                    if (buffer[idx] == '\n') {
+                        idx += 1;
+                        self.current_step = .done;
+                        self.current_info.pathname = UNDEFINED_NAME;
+                    } else {
+                        idx += ParseInfo.skip_whitespace(buffer, idx);
+                        const res = self.parse_path(buffer, idx, .done);
+                        if (res.step == .done) {
+                            self.current_info.pathname = try self.alloc.dupe(
+                                u8,
+                                self.working_buffer[0..self.working_buffer_n],
+                            );
+                            self.working_buffer_n = 0;
+                        }
+                        idx += res.bytes_read;
+                        self.current_step = res.step;
                     }
-                    idx += res.bytes_read;
-                    self.current_step = res.step;
                 },
                 ParseStep.done => {
                     done = true;
@@ -486,13 +495,13 @@ pub const Manager = struct {
         errdefer self.clear_pid();
         self.map_filename = try std.fmt.allocPrint(self.alloc, MAP_FILE, .{pid});
         self.pid = pid;
-        const mem_file = try std.fs.openFileAbsolute(self.map_file, .{});
+        const mem_file = try std.fs.openFileAbsolute(self.map_filename, .{});
         defer mem_file.close();
-        const buffer: [1024]u8 = undefined;
-        var read_n: usize = try mem_file.read(buffer);
+        var buffer: [1024]u8 = undefined;
+        var read_n: usize = try mem_file.read(buffer[0..]);
         while (read_n > 0) {
             _ = try self.load_from_buffer(buffer[0..read_n], 0, false);
-            read_n = try mem_file.read(buffer);
+            read_n = try mem_file.read(buffer[0..]);
         }
         // the parser uses a newline to know the ending of a line
         // so in the case of the last entry not having a newline
@@ -514,7 +523,7 @@ pub const Manager = struct {
         }
         var result: StringList = .init(alloc);
         while (kit.next()) |key| {
-            const key_val = try alloc.dupe(u8, key);
+            const key_val = try alloc.dupe(u8, key.*);
             try result.append(key_val);
         }
         return result;

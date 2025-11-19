@@ -2,26 +2,46 @@ const std = @import("std");
 const plunder = @import("plunder");
 
 pub fn main() !void {
-    // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try plunder.bufferedPrint();
-}
-
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
+    const alloc = std.heap.smp_allocator;
+    // initialize plunder lib.
+    var pl: plunder.mem.Plunder = .init(alloc);
+    defer pl.deinit();
+    // load mapping info for process ID.
+    try pl.load(264537);
+    // get region names from memory mapping file.
+    const names = try pl.get_region_names(alloc);
+    if (names) |name| {
+        for (name.items) |entry| {
+            std.debug.print("Map name: {s}\n", .{entry});
         }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+    }
+    // get region data for the heap region.
+    const reg_opt = try pl.get_region_data(
+        "[heap]",
+    );
+    if (reg_opt) |*region_ptr| {
+        var region = region_ptr.*;
+        defer region.deinit();
+        // get the non-zero data from the region in a memory list.
+        const mem = try region.get_populated_memory(alloc);
+        defer mem.deinit();
+        for (mem.items) |*memory_ptr| {
+            var memory = memory_ptr.*;
+            defer memory.deinit();
+            std.debug.print("ADDR = {}\n", .{memory.info.start_addr});
+            std.debug.print("OFFSET = {}\n", .{memory.starting_offset});
+            std.debug.print("BUFFER\n", .{});
+            for (memory.buffer.?, 0..) |c, idx| {
+                if (std.ascii.isAlphabetic(c)) {
+                    std.debug.print("{c} ", .{c});
+                } else {
+                    std.debug.print("{x} ", .{c});
+                }
+                if (((idx + 1) % 10) == 0) {
+                    std.debug.print("\n", .{});
+                }
+            }
+        }
+        std.debug.print("\n", .{});
+    }
 }
