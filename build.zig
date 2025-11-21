@@ -1,5 +1,55 @@
 const std = @import("std");
 
+fn build_test(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    path: []const u8,
+    name: []const u8,
+    lib_mod: *std.Build.Module,
+) !void {
+    const exe_mod = b.createModule(.{
+        .root_source_file = b.path(path),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("plunder", lib_mod);
+    const exe = b.addExecutable(.{
+        .name = name,
+        .root_module = exe_mod,
+    });
+    b.installArtifact(exe);
+}
+
+fn build_c_exe(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    path: []const u8,
+    name: []const u8,
+) !void {
+    const exe_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    exe_mod.addCSourceFiles(.{
+        .language = .c,
+        .files = &.{
+            path,
+        },
+        .flags = &.{
+            "-Wall",
+            "-std=c11",
+        },
+    });
+    const exe = b.addExecutable(.{
+        .name = name,
+        .root_module = exe_mod,
+    });
+    b.installArtifact(exe);
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -33,6 +83,23 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
+
+    // build test programs.
+    try build_test(
+        b,
+        target,
+        optimize,
+        "test/heap_read.zig",
+        "heap_read",
+        mod,
+    );
+    try build_c_exe(
+        b,
+        target,
+        optimize,
+        "test/dummy.c",
+        "dummy",
+    );
 
     // test build
     const test_mod = b.createModule(.{
