@@ -1,13 +1,32 @@
 const std = @import("std");
 const plunder = @import("plunder");
 
+const Errors = error {
+    missing_pid,
+};
+
 pub fn main() !void {
+    var args = std.process.args();
+    defer args.deinit();
+
+    // skip main file
+    _ = args.next();
+    const pid_arg = args.next();
+    if (pid_arg == null) {
+        return Errors.missing_pid;
+    }
+
+    var pid: usize = undefined;
+    if (pid_arg) |p| {
+        pid = try std.fmt.parseInt(usize, p, 10);
+    }
+
     const alloc = std.heap.smp_allocator;
     // initialize plunder lib.
     var pl: plunder.Plunder = .init(alloc);
     defer pl.deinit();
     // load mapping info for process ID.
-    try pl.load(264537);
+    try pl.load(pid);
     // get region names from memory mapping file.
     const names = try pl.get_region_names(alloc);
     if (names) |name| {

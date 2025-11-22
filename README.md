@@ -53,3 +53,14 @@ pub fn main() !void {
     }
 }
 ```
+
+## Testing
+
+The folder `test` contains a simple example of testing against a C program
+that allocates memory on the heap.
+
+The `heap_read.zig` file accepts the process ID to read from and searches for
+the test text that is allocated in the `dummy.c` file.
+
+You can run this test with the `run_test.sh` script at the top of the repo.
+
