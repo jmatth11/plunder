@@ -2,10 +2,12 @@
 
 A simple library to read memory from a running process.
 
+There are plans to add more functionality to this library, but the current
+feature set allows for the core functionality to read memory from a running
+process to be achieved.
+
 !! warning !!
 This library is still in the early stages and the API may change.
-
-- [ ] TODO finish readme
 
 ## Example
 

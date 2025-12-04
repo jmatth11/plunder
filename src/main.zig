@@ -5,6 +5,9 @@ const Errors = error {
     missing_pid,
 };
 
+// This program takes a process ID as a command line argument and reads out the
+// heap memory. It only prints out non-zero values from the heap.
+
 pub fn main() !void {
     var args = std.process.args();
     defer args.deinit();
