@@ -4,6 +4,10 @@ const map = @import("map.zig");
 /// Process memory file path.
 const MEM_FILE: []const u8 = "/proc/{}/mem";
 
+pub const Errors = error {
+    memory_buffer_not_set,
+};
+
 /// Memory structure to hold the buffer of mapped memory.
 pub const Memory = struct {
     alloc: std.mem.Allocator = undefined,
@@ -29,6 +33,45 @@ pub const Memory = struct {
         result.info = try info.dupe(alloc);
         result.buffer = try result.alloc.dupe(u8, buffer);
         return result;
+    }
+
+    pub fn hex_dump(self: *const Memory, writer: *std.io.Writer) !void {
+        if (self.buffer == null) {
+            return Errors.memory_buffer_not_set;
+        }
+        var offset: usize = 0;
+        const end: usize = offset + self.buffer.?.len;
+        const base_addr: usize = self.info.start_addr + self.starting_offset;
+        while (offset < end) {
+            try writer.*.print("{X:0>12} ", .{base_addr + offset});
+            var byte_idx: usize = 0;
+            while (byte_idx < 16) : (byte_idx += 1) {
+                const idx: usize = offset + byte_idx;
+                if (idx < self.buffer.?.len) {
+                    try writer.*.print("{X:0>2} ", .{self.buffer.?[idx]});
+                } else {
+                    _ = try writer.*.write("   ");
+                }
+            }
+            byte_idx = 0;
+            _ = try writer.*.write("|");
+            while (byte_idx < 16) : (byte_idx += 1) {
+                const idx: usize = offset + byte_idx;
+                if (idx < self.buffer.?.len) {
+                    const local_char: u8 = self.buffer.?[idx];
+                    if (local_char >= 33 and local_char <= 126) {
+                        try writer.*.print("{c}", .{self.buffer.?[idx]});
+                    } else {
+                        _ = try writer.*.write(".");
+                    }
+                } else {
+                    _ = try writer.*.write(".");
+                }
+            }
+            _ = try writer.*.write("|\n");
+            offset += 16;
+        }
+        try writer.*.flush();
     }
 
     /// Deinitialize.

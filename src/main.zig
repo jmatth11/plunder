@@ -41,29 +41,16 @@ pub fn main() !void {
     const reg_opt = try pl.get_region_data(
         "[heap]",
     );
+    var buffer: [1024]u8 = undefined;
     if (reg_opt) |*region_ptr| {
         var region = region_ptr.*;
         defer region.deinit();
-        // get the non-zero data from the region in a memory list.
+        //// get the non-zero data from the region in a memory list.
         const mem = try region.get_populated_memory(alloc);
         defer mem.deinit();
-        for (mem.items) |*memory_ptr| {
-            var memory = memory_ptr.*;
-            defer memory.deinit();
-            std.debug.print("ADDR = {}\n", .{memory.info.start_addr});
-            std.debug.print("OFFSET = {}\n", .{memory.starting_offset});
-            std.debug.print("BUFFER\n", .{});
-            for (memory.buffer.?, 0..) |c, idx| {
-                if (std.ascii.isAlphabetic(c)) {
-                    std.debug.print("{c} ", .{c});
-                } else {
-                    std.debug.print("{x} ", .{c});
-                }
-                if (((idx + 1) % 10) == 0) {
-                    std.debug.print("\n", .{});
-                }
-            }
+        for (mem.items) |memory| {
+            var wr = std.fs.File.stdout().writer(&buffer);
+            try memory.hex_dump(&wr.interface);
         }
-        std.debug.print("\n", .{});
     }
 }
