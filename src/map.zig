@@ -374,8 +374,7 @@ const ParseInfo = struct {
         var result: ParseResult = .{ .step = self.current_step };
         var idx: usize = offset;
         while (idx < buffer.len) : (idx += 1) {
-            // TODO maybe need to change for unicode support.
-            if (!std.ascii.isWhitespace(buffer[idx])) {
+            if (buffer[idx] != '\n') {
                 self.working_buffer[self.working_buffer_n] = buffer[idx];
                 self.working_buffer_n += 1;
             } else {
