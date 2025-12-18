@@ -44,16 +44,43 @@ pub fn get_tcp_info(alloc: std.mem.Allocator, pid: usize) ![]NetworkInfo {
 
     const file_reader = tcp_file.reader(read_buf);
     while (try file_reader.interface.takeDelimiter("\n")) |line| {
-        var parser: std.fmt.Parser = .{ .bytes = line };
-        const inode = parser.until(":");
+        var parser: std.fmt.Parser = .{ .bytes = line, .i = 0 };
+        const sl = parser.until(':');
+        parser.i += 2;
+        const local_ip_hex = parser.until(':');
+        parser.i += 1;
+        const local_port = parser.until(' ');
+        parser.i += 1;
+        const remote_ip_hex = parser.until(':');
+        parser.i += 1;
+        const remote_port = parser.until(' ');
+        parser.i += 1;
+        const state = parser.until(' ');
+        parser.i += 1;
+        // skip tx_queue:rx_queue
+        _ = parser.until(' ');
+        parser.i += 1;
+        // skip tr:tm->when
+        _ = parser.until(' ');
+        parser.i += 1;
+        // skip retrnsmt
+        _ = parser.until(' ');
+        parser.i += 1;
+        var skip_count: usize = 0;
+        // skip variable whitespace columns (UID, timeout)
+        while (parser.peek(1)) |char| {
+            if (std.ascii.isDigit(char)) {
+                skip_count += 1;
+                _ = parser.until(' ');
+                if (skip_count == 2) {
+                    break;
+                }
+            }
+        }
+        parser.i += 1;
+        const inode = parser.until(' ');
         if (has_inode(inodes, inode)) {
-//                    // Parse the line: sl local_address remote_address st ... inode
-//        int fields = sscanf(line, "%d: %[^:]:%X %[^:]:%X %X %*s %*s %*s %*s %*s %lu",
-//                           &sl, local_ip_hex, &local_port,
-//                           remote_ip_hex, &remote_port,
-//                           &state, &inode);
-
-
+            // TODO construct NetworkInfo
         }
     }
 }
