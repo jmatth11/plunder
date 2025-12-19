@@ -4,8 +4,10 @@ const map = @import("map.zig");
 /// Process memory file path.
 const MEM_FILE: []const u8 = "/proc/{}/mem";
 
-pub const Errors = error {
+pub const Errors = error{
     memory_buffer_not_set,
+    out_of_bounds,
+    not_writable,
 };
 
 /// Memory structure to hold the buffer of mapped memory.
@@ -35,6 +37,47 @@ pub const Memory = struct {
         return result;
     }
 
+    /// Write a given buffer to the memory offset.
+    pub fn write(self: *Memory, offset: usize, buf: []const u8) !usize {
+        if (self.buffer == null) {
+            return Errors.memory_buffer_not_set;
+        }
+        if (!self.info.is_write()) {
+            return Errors.not_writable;
+        }
+        const buffer = self.buffer.?;
+        if ((offset + buf.len) > buffer.len) {
+            return Errors.out_of_bounds;
+        }
+        var starting_idx: usize = offset;
+        var buf_idx: usize = 0;
+        const end: usize = offset + buf.len;
+
+        var new_buffer: []u8 = try self.alloc.dupe(u8, buffer);
+        errdefer self.alloc.free(new_buffer);
+
+        while (starting_idx < end) {
+            new_buffer[starting_idx] = buf[buf_idx];
+            starting_idx += 1;
+            buf_idx += 1;
+        }
+
+        const filename = try std.fmt.allocPrint(self.alloc, MEM_FILE, .{self.info.pid});
+        defer self.alloc.free(filename);
+
+        const fs = try std.fs.openFileAbsolute(filename, .{
+            .mode = .write_only,
+        });
+        defer fs.close();
+
+        try fs.seekTo(self.info.start_addr + self.starting_offset + offset);
+        const result = try fs.write(new_buffer[offset..(offset + buf.len)]);
+        self.alloc.free(buffer);
+        self.buffer = new_buffer;
+        return result;
+    }
+
+    /// Write out the memory info in a hex dump style.
     pub fn hex_dump(self: *const Memory, writer: *std.io.Writer) !void {
         if (self.buffer == null) {
             return Errors.memory_buffer_not_set;

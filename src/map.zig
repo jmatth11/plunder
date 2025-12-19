@@ -9,6 +9,7 @@ const MAP_FILE: []const u8 = "/proc/{}/maps";
 pub const Errors = error{
     /// Permissions are malformed
     malformed_permissions,
+    missing_pid,
 };
 
 pub const StringList = std.array_list.Managed([]const u8);
@@ -39,6 +40,8 @@ pub const Permissions = enum(u8) {
 /// This structure holds all the info for a memory mapped entry.
 pub const Info = struct {
     alloc: std.mem.Allocator = undefined,
+    /// The process ID.
+    pid: usize = 0,
     /// The pathname the memory map belongs to.
     pathname: ?[]const u8 = null,
     /// The starting address in the associated memory file.
@@ -70,6 +73,7 @@ pub const Info = struct {
         }
         return .{
             .alloc = alloc,
+            .pid = self.pid,
             .pathname = local_pathname,
             .start_addr = self.start_addr,
             .end_addr = self.end_addr,
@@ -466,9 +470,9 @@ pub const Manager = struct {
     pub fn load_from_buffer(self: *Manager, buffer: []const u8, offset: usize, flush: bool) !usize {
         var idx: usize = offset;
         while (idx < buffer.len) {
-            const res = try self.parser.parse(buffer, idx);
+            var res = try self.parser.parse(buffer, idx);
             if (res.step == .done) {
-                if (res.info) |info_var| {
+                if (res.info) |*info_var| {
                     try self.add_entry(info_var);
                 } else {
                     unreachable;
@@ -477,8 +481,8 @@ pub const Manager = struct {
             idx += res.bytes_read;
         }
         if (flush) {
-            const info_op = try self.parser.flush_last();
-            if (info_op) |info_var| {
+            var info_op = try self.parser.flush_last();
+            if (info_op) |*info_var| {
                 try self.add_entry(info_var);
             }
         }
@@ -507,8 +511,8 @@ pub const Manager = struct {
         // we call the parser's flush_last function which will give us
         // the last entry if it meets the right conditions to be a valid
         // memory map entry, otherwise it returns null.
-        const info_op = try self.parser.flush_last();
-        if (info_op) |info_var| {
+        var info_op = try self.parser.flush_last();
+        if (info_op) |*info_var| {
             try self.add_entry(info_var);
         }
     }
@@ -540,7 +544,12 @@ pub const Manager = struct {
         self.collection.deinit();
     }
 
-    fn add_entry(self: *Manager, info: Info) !void {
+    fn add_entry(self: *Manager, info: *Info) !void {
+        if (self.pid) |pid| {
+            info.*.pid = pid;
+        } else {
+            return Errors.missing_pid;
+        }
         var key: []const u8 = undefined;
         if (info.pathname) |pathname| {
             key = pathname;
@@ -550,10 +559,10 @@ pub const Manager = struct {
         }
         const arr_op = self.collection.getPtr(key);
         if (arr_op) |arr| {
-            try arr.append(info);
+            try arr.append(info.*);
         } else {
             var arr: InfoList = .init(self.alloc);
-            try arr.append(info);
+            try arr.append(info.*);
             try self.collection.put(key, arr);
         }
     }

@@ -6,6 +6,8 @@ const Errors = error {
 };
 
 const TEST_STR: []const u8 = "test string";
+const REPLACE_STR: []const u8 = "value!";
+const TEST_REPLACE_STR: []const u8 = "test value!";
 
 pub fn main() !void {
     var args = std.process.args();
@@ -46,6 +48,31 @@ pub fn main() !void {
             var memory = memory_ptr.*;
             defer memory.deinit();
             if (std.mem.eql(u8, TEST_STR, memory.buffer.?)) {
+                contains_test_str = true;
+                // test writting to memory for test further down
+                const n = try memory.write(5, REPLACE_STR);
+                try std.testing.expectEqual(6, n);
+            }
+        }
+        try std.testing.expect(contains_test_str);
+
+    }
+
+    // ----------------- check written values ----------------
+    const changed_reg_opt = try pl.get_region_data(
+        "[heap]",
+    );
+    if (changed_reg_opt) |*changed_reg| {
+        var region = changed_reg.*;
+        defer region.deinit();
+
+        const changed_mem = try region.get_populated_memory(alloc);
+        defer changed_mem.deinit();
+        var contains_test_str: bool = false;
+        for (changed_mem.items) |*memory_ptr| {
+            var memory = memory_ptr.*;
+            defer memory.deinit();
+            if (std.mem.eql(u8, TEST_REPLACE_STR, memory.buffer.?)) {
                 contains_test_str = true;
             }
         }
