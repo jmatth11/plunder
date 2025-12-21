@@ -4,6 +4,8 @@ pub const map = @import("map.zig");
 pub const mem = @import("mem.zig");
 /// namespace for network info.
 pub const network = @import("network.zig");
+/// helper functions to interact with processes.
+pub const proc = @import("proc.zig");
 /// Plunder structure to grab memory from a running process.
 /// Most interactions will be done through this structure.
 pub const Plunder = mem.Plunder;
