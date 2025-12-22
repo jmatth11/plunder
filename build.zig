@@ -61,6 +61,26 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const dvui_dep = b.dependency("dvui", .{
+        .target = target,
+        .optimize = optimize,
+        .backend = .sdl3,
+    });
+
+    const gui = b.addExecutable(.{
+        .name = "plunder-gui",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gui.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "plunder", .module = mod },
+                .{ .name = "dvui", .module = dvui_dep.module("dvui_sdl3") },
+            },
+        }),
+    });
+    b.installArtifact(gui);
+
     // create executable
     const exe = b.addExecutable(.{
         .name = "plunder",
@@ -70,6 +90,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "plunder", .module = mod },
+                .{ .name = "dvui", .module = dvui_dep.module("dvui_sdl3") },
             },
         }),
     });

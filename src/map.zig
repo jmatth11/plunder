@@ -1,4 +1,5 @@
 const std = @import("std");
+const common = @import("common.zig");
 
 /// Undefined name for empty name maps
 pub const UNDEFINED_NAME: []const u8 = "undefined";
@@ -11,8 +12,6 @@ pub const Errors = error{
     malformed_permissions,
     missing_pid,
 };
-
-pub const StringList = std.array_list.Managed([]const u8);
 
 /// Permission values for memory map.
 pub const Permissions = enum(u8) {
@@ -519,12 +518,12 @@ pub const Manager = struct {
 
     /// Get the list of region names of mapped memory.
     /// User is responsible for managing the returned resources.
-    pub fn get_region_names(self: *Manager, alloc: std.mem.Allocator) !?StringList {
+    pub fn get_region_names(self: *Manager, alloc: std.mem.Allocator) !?common.StringList {
         var kit = self.collection.keyIterator();
         if (kit.len == 0) {
             return null;
         }
-        var result: StringList = .init(alloc);
+        var result: common.StringList = .init(alloc);
         while (kit.next()) |key| {
             const key_val = try alloc.dupe(u8, key.*);
             try result.append(key_val);

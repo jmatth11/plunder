@@ -166,7 +166,7 @@ fn get_socket_inodes(alloc: std.mem.Allocator, pid: usize) ![]usize {
 }
 
 /// Convenience function to check if inode is in inodes list.
-fn has_inode(inodes: []usize, inode: usize) !bool {
+fn has_inode(inodes: []usize, inode: usize) bool {
     for (inodes) |entry| {
         if (entry == inode) {
             return true;
@@ -234,7 +234,7 @@ fn parse_network_line(network_type: NetworkType, line: []const u8, inodes: []usi
     }
     const inode_str = parser.until(' ');
     const inode = try std.fmt.parseInt(usize, inode_str, 10);
-    if (try has_inode(inodes, inode)) {
+    if (has_inode(inodes, inode)) {
         const info: NetworkInfo = .{
             .inode = inode,
             .state = @enumFromInt(try std.fmt.parseInt(u16, state, 16)),
