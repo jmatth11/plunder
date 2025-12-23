@@ -1,0 +1,1 @@
+- [ ] Properly handle proc objects/info if proc comes down after our first query
