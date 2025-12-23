@@ -1,6 +1,7 @@
 const std = @import("std");
 const dvui = @import("dvui");
 const plunder = @import("plunder");
+const proc_gui = @import("gui/procs.zig");
 
 // To be a dvui App:
 // * declare "dvui_app"
@@ -34,6 +35,7 @@ const gpa = gpa_instance.allocator();
 var orig_content_scale: f32 = 1.0;
 var warn_on_quit: bool = false;
 var warn_on_quit_closing: bool = false;
+var process_view: proc_gui.ProcView = undefined;
 
 // Runs before the first frame, after backend and dvui.Window.init()
 // - runs between win.begin()/win.end()
@@ -52,6 +54,7 @@ pub fn AppInit(win: *dvui.Window) !void {
 
         win.themeSet(theme);
     }
+    process_view = try .init(gpa);
 }
 
 // Run as app is shutting down before dvui.Window.deinit()
@@ -96,96 +99,98 @@ pub fn frame() !dvui.App.Result {
             }
         }
     }
-
     var scroll = dvui.scrollArea(@src(), .{}, .{ .expand = .both, .style = .window });
     defer scroll.deinit();
 
-    var tl = dvui.textLayout(@src(), .{}, .{ .expand = .horizontal, .font = .theme(.title) });
-    const lorem = "This is a dvui.App example that can compile on multiple backends.";
-    tl.addText(lorem, .{});
-    tl.addText("\n", .{});
-    tl.format("Current backend: {s}", .{@tagName(dvui.backend.kind)}, .{});
-    if (dvui.backend.kind == .web) {
-        tl.format(" : {s}", .{if (dvui.backend.wasm.wasm_about_webgl2() == 1) "webgl2" else "webgl (no mipmaps)"}, .{});
-    }
-    tl.deinit();
+    try process_view.frame();
 
-    var tl2 = dvui.textLayout(@src(), .{}, .{ .expand = .horizontal });
-    tl2.addText(
-        \\DVUI
-        \\- paints the entire window
-        \\- can show floating windows and dialogs
-        \\- rest of the window is a scroll area
-    , .{});
-    tl2.addText("\n\n", .{});
-    tl2.addText("Framerate is variable and adjusts as needed for input events and animations.", .{});
-    tl2.addText("\n\n", .{});
-    tl2.addText("Framerate is capped by vsync.", .{});
-    tl2.addText("\n\n", .{});
-    tl2.addText("Cursor is always being set by dvui.", .{});
-    tl2.addText("\n\n", .{});
-    if (dvui.useFreeType) {
-        tl2.addText("Fonts are being rendered by FreeType 2.", .{});
-    } else {
-        tl2.addText("Fonts are being rendered by stb_truetype.", .{});
-    }
-    tl2.deinit();
 
-    const label = if (dvui.Examples.show_demo_window) "Hide Demo Window" else "Show Demo Window";
-    if (dvui.button(@src(), label, .{}, .{ .tag = "show-demo-btn" })) {
-        dvui.Examples.show_demo_window = !dvui.Examples.show_demo_window;
-    }
+    //var tl = dvui.textLayout(@src(), .{}, .{ .expand = .horizontal, .font = .theme(.title) });
+    //const lorem = "This is a dvui.App example that can compile on multiple backends.";
+    //tl.addText(lorem, .{});
+    //tl.addText("\n", .{});
+    //tl.format("Current backend: {s}", .{@tagName(dvui.backend.kind)}, .{});
+    //if (dvui.backend.kind == .web) {
+    //    tl.format(" : {s}", .{if (dvui.backend.wasm.wasm_about_webgl2() == 1) "webgl2" else "webgl (no mipmaps)"}, .{});
+    //}
+    //tl.deinit();
 
-    if (dvui.button(@src(), "Debug Window", .{}, .{})) {
-        dvui.toggleDebugWindow();
-    }
+    //var tl2 = dvui.textLayout(@src(), .{}, .{ .expand = .horizontal });
+    //tl2.addText(
+    //    \\DVUI
+    //    \\- paints the entire window
+    //    \\- can show floating windows and dialogs
+    //    \\- rest of the window is a scroll area
+    //, .{});
+    //tl2.addText("\n\n", .{});
+    //tl2.addText("Framerate is variable and adjusts as needed for input events and animations.", .{});
+    //tl2.addText("\n\n", .{});
+    //tl2.addText("Framerate is capped by vsync.", .{});
+    //tl2.addText("\n\n", .{});
+    //tl2.addText("Cursor is always being set by dvui.", .{});
+    //tl2.addText("\n\n", .{});
+    //if (dvui.useFreeType) {
+    //    tl2.addText("Fonts are being rendered by FreeType 2.", .{});
+    //} else {
+    //    tl2.addText("Fonts are being rendered by stb_truetype.", .{});
+    //}
+    //tl2.deinit();
 
-    {
-        var hbox = dvui.box(@src(), .{ .dir = .horizontal }, .{});
-        defer hbox.deinit();
-        dvui.label(@src(), "Pinch Zoom or Scale", .{}, .{});
-        if (dvui.buttonIcon(@src(), "plus", dvui.entypo.plus, .{}, .{}, .{})) {
-            dvui.currentWindow().content_scale *= 1.1;
-        }
+    //const label = if (dvui.Examples.show_demo_window) "Hide Demo Window" else "Show Demo Window";
+    //if (dvui.button(@src(), label, .{}, .{ .tag = "show-demo-btn" })) {
+    //    dvui.Examples.show_demo_window = !dvui.Examples.show_demo_window;
+    //}
 
-        if (dvui.buttonIcon(@src(), "minus", dvui.entypo.minus, .{}, .{}, .{})) {
-            dvui.currentWindow().content_scale /= 1.1;
-        }
+    //if (dvui.button(@src(), "Debug Window", .{}, .{})) {
+    //    dvui.toggleDebugWindow();
+    //}
 
-        if (dvui.currentWindow().content_scale != orig_content_scale) {
-            if (dvui.button(@src(), "Reset Scale", .{}, .{})) {
-                dvui.currentWindow().content_scale = orig_content_scale;
-            }
-        }
-    }
+    //{
+    //    var hbox = dvui.box(@src(), .{ .dir = .horizontal }, .{});
+    //    defer hbox.deinit();
+    //    dvui.label(@src(), "Pinch Zoom or Scale", .{}, .{});
+    //    if (dvui.buttonIcon(@src(), "plus", dvui.entypo.plus, .{}, .{}, .{})) {
+    //        dvui.currentWindow().content_scale *= 1.1;
+    //    }
 
-    if (dvui.backend.kind != .web) {
-        _ = dvui.checkbox(@src(), &warn_on_quit, "Warn on Quit", .{});
+    //    if (dvui.buttonIcon(@src(), "minus", dvui.entypo.minus, .{}, .{}, .{})) {
+    //        dvui.currentWindow().content_scale /= 1.1;
+    //    }
 
-        if (warn_on_quit) {
-            if (warn_on_quit_closing) return .close;
+    //    if (dvui.currentWindow().content_scale != orig_content_scale) {
+    //        if (dvui.button(@src(), "Reset Scale", .{}, .{})) {
+    //            dvui.currentWindow().content_scale = orig_content_scale;
+    //        }
+    //    }
+    //}
 
-            const wd = dvui.currentWindow().data();
-            for (dvui.events()) |*e| {
-                if (!dvui.eventMatchSimple(e, wd)) continue;
+    //if (dvui.backend.kind != .web) {
+    //    _ = dvui.checkbox(@src(), &warn_on_quit, "Warn on Quit", .{});
 
-                if ((e.evt == .window and e.evt.window.action == .close) or (e.evt == .app and e.evt.app.action == .quit)) {
-                    e.handle(@src(), wd);
+    //    if (warn_on_quit) {
+    //        if (warn_on_quit_closing) return .close;
 
-                    const warnAfter: dvui.DialogCallAfterFn = struct {
-                        fn warnAfter(_: dvui.Id, response: dvui.enums.DialogResponse) !void {
-                            if (response == .ok) warn_on_quit_closing = true;
-                        }
-                    }.warnAfter;
+    //        const wd = dvui.currentWindow().data();
+    //        for (dvui.events()) |*e| {
+    //            if (!dvui.eventMatchSimple(e, wd)) continue;
 
-                    dvui.dialog(@src(), .{}, .{ .message = "Really Quit?", .cancel_label = "Cancel", .callafterFn = warnAfter });
-                }
-            }
-        }
-    }
+    //            if ((e.evt == .window and e.evt.window.action == .close) or (e.evt == .app and e.evt.app.action == .quit)) {
+    //                e.handle(@src(), wd);
 
-    // look at demo() for examples of dvui widgets, shows in a floating window
-    dvui.Examples.demo();
+    //                const warnAfter: dvui.DialogCallAfterFn = struct {
+    //                    fn warnAfter(_: dvui.Id, response: dvui.enums.DialogResponse) !void {
+    //                        if (response == .ok) warn_on_quit_closing = true;
+    //                    }
+    //                }.warnAfter;
+
+    //                dvui.dialog(@src(), .{}, .{ .message = "Really Quit?", .cancel_label = "Cancel", .callafterFn = warnAfter });
+    //            }
+    //        }
+    //    }
+    //}
+
+    //// look at demo() for examples of dvui widgets, shows in a floating window
+    //dvui.Examples.demo();
 
     return .ok;
 }

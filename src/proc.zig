@@ -16,6 +16,9 @@ pub const ProcInfo = struct {
         var result: ProcInfo = .{
             .alloc = alloc,
             .pid = pid,
+            .command = undefined,
+            .command_line = undefined,
+            .environment_vars = undefined,
         };
         try result.get_comm();
         try result.get_command_line();
@@ -41,6 +44,7 @@ pub const ProcInfo = struct {
             );
             defer self.alloc.free(file_path);
             self.command = try get_single_line_file(self.alloc, file_path, '\n');
+            std.log.debug("command={s}", .{self.command});
         } else {
             return Errors.pid_not_set;
         }
@@ -76,13 +80,19 @@ pub const ProcInfo = struct {
     }
 };
 
+/// This function assumes the file being opened is a single line file (i.e. comm, cmdline, environ)
 fn get_single_line_file(alloc: std.mem.Allocator, filename: []const u8, delimiter: u8) ![]const u8 {
+    std.log.debug("filename = {s}", .{filename});
     var fs = try std.fs.openFileAbsolute(filename, .{});
     defer fs.close();
     var read_buf: [1024]u8 = undefined;
-    const reader = fs.reader(&read_buf);
-    const line = reader.interface.takeDelimiter(delimiter);
-    return try alloc.dupe(u8, line);
+    var reader = fs.reader(&read_buf);
+    var writer: std.io.Writer.Allocating = .init(alloc);
+    errdefer writer.deinit();
+    _ = try reader.interface.streamDelimiterEnding(&writer.writer, delimiter);
+    const line = try writer.toOwnedSlice();
+    errdefer alloc.free(line);
+    return line;
 }
 
 pub const ProcInfoList = std.array_list.Managed(ProcInfo);
@@ -99,10 +109,12 @@ pub const ProcList = struct {
     }
 
     pub fn add(self: *ProcList, pid: []const u8) !void {
-        const proc: ProcInfo = try .init(
+        std.log.debug("ProcList.add({s})", .{pid});
+        var proc: ProcInfo = try .init(
             self.alloc.allocator(),
             try std.fmt.parseInt(usize, pid, 10),
         );
+        errdefer proc.deinit();
         try self.procs.append(proc);
     }
 
@@ -113,13 +125,17 @@ pub const ProcList = struct {
 };
 
 pub fn get_processes(alloc: std.mem.Allocator) !ProcList {
-    const dir = try std.fs.openDirAbsolute("/proc", .{});
-    var walk = try dir.walk(alloc);
-    defer walk.deinit();
+    const dir = try std.fs.openDirAbsolute("/proc", .{
+        .iterate = true,
+        .access_sub_paths = false,
+        .no_follow = true,
+    });
+    var it = dir.iterate();
     var result: ProcList = .init(alloc);
-    while (try walk.next()) |entry| {
-        if (all_digits(entry.basename)) {
-            try result.add(entry.basename);
+    errdefer result.deinit();
+    while (try it.next()) |entry| {
+        if (all_digits(entry.name)) {
+            try result.add(entry.name);
         }
     }
     return result;
