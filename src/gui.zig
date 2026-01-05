@@ -36,6 +36,7 @@ var orig_content_scale: f32 = 1.0;
 var warn_on_quit: bool = false;
 var warn_on_quit_closing: bool = false;
 var process_view: proc_gui.ProcView = undefined;
+var access_denied: bool = false;
 
 // Runs before the first frame, after backend and dvui.Window.init()
 // - runs between win.begin()/win.end()
@@ -54,7 +55,15 @@ pub fn AppInit(win: *dvui.Window) !void {
 
         win.themeSet(theme);
     }
-    process_view = try .init(gpa);
+    if (proc_gui.ProcView.init(gpa)) |pv| {
+        process_view = pv;
+    } else |err| {
+        if (err == error.AccessDenied) {
+            access_denied = true;
+        } else {
+            return err;
+        }
+    }
 }
 
 // Run as app is shutting down before dvui.Window.deinit()
@@ -66,13 +75,21 @@ pub fn AppFrame() !dvui.App.Result {
 }
 
 pub fn frame() !dvui.App.Result {
+
+    if (access_denied) {
+        var tl = dvui.textLayout(@src(), .{}, .{ .expand = .horizontal, .font = .theme(.body) });
+        const msg = "Could not open process file. Please run with 'sudo'.";
+        tl.addText(msg, .{.style = .err, .color_text = .red});
+        tl.addText("\n", .{});
+        tl.deinit();
+        return .ok;
+    }
     var scaler = dvui.scale(
         @src(),
         .{ .scale = &dvui.currentWindow().content_scale, .pinch_zoom = .global },
         .{ .rect = .cast(dvui.windowRect()) },
     );
     scaler.deinit();
-
     {
         var hbox = dvui.box(
             @src(),
