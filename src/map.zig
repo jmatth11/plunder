@@ -153,6 +153,100 @@ const ParseResult = struct {
     info: ?Info = null,
     bytes_read: usize = 0,
 };
+
+fn parse_map_line(alloc: std.mem.Allocator, line: []const u8) !Info {
+    var result: Info = .init(alloc);
+    var parser: std.fmt.Parser = .{ .bytes = line, .i = 0 };
+
+    const start_addr = parser.until('-');
+    result.start_addr = try std.fmt.parseInt(
+        usize,
+        start_addr,
+        16,
+    );
+    // increment past '-'
+    parser.i += 1;
+
+    const end_addr = parser.until(' ');
+    result.end_addr = try std.fmt.parseInt(
+        usize,
+        end_addr,
+        16,
+    );
+    parser.i += 1;
+
+    var perm_bit = parser.char();
+    if (perm_bit) |bit| {
+        if (bit == 'r') {
+            result.set_read();
+        }
+    }
+    perm_bit = parser.char();
+    if (perm_bit) |bit| {
+        if (bit == 'w') {
+            result.set_write();
+        }
+    }
+    perm_bit = parser.char();
+    if (perm_bit) |bit| {
+        if (bit == 'x') {
+            result.set_execute();
+        }
+    }
+    perm_bit = parser.char();
+    if (perm_bit) |bit| {
+        if (bit == 's') {
+            result.set_shared();
+        }
+    }
+    // skip next space.
+    parser.i += 1;
+
+    const offset = parser.until(' ');
+    result.offset = try std.fmt.parseInt(
+        u32,
+        offset,
+        16,
+    );
+    parser.i += 1;
+
+    const dev_major = parser.until(':');
+    result.dev_major = try std.fmt.parseInt(
+        u16,
+        dev_major,
+        16,
+    );
+    parser.i += 1;
+
+    const dev_minor = parser.until(' ');
+    result.dev_minor = try std.fmt.parseInt(
+        u16,
+        dev_minor,
+        16,
+    );
+    parser.i += 1;
+
+    const inode = parser.until(' ');
+    result.inode = try std.fmt.parseInt(u32, inode, 10);
+    parser.i += 1;
+    var next_char = parser.peek(1);
+    // some lines end at this point so we check.
+    if (parser.i >= line.len or next_char == null or (next_char != null and next_char.? == '\n')) {
+        return result;
+    }
+    // skip all whitespace
+    while (next_char != null and next_char.? == ' ') {
+        parser.i += 1;
+        next_char = parser.peek(1);
+    }
+
+    const process = parser.until('\n');
+    if (process.len > 0) {
+        result.pathname = try alloc.dupe(u8, process);
+    }
+
+    return result;
+}
 const ParseInfo = struct {
     alloc: std.mem.Allocator,
     current_step: ParseStep = .nothing,
@@ -168,7 +262,7 @@ const ParseInfo = struct {
     }
 
     fn err_debug(self: *ParseInfo, buffer: []const u8) void {
-        std.log.err("Error occurred with working str\n Buffer = '{s}'\n working_str = '{s}'\n", .{buffer, self.working_buffer[0..self.working_buffer_n]});
+        std.log.err("Error occurred with working str\n Buffer = '{s}'\n working_str = '{s}'\n", .{ buffer, self.working_buffer[0..self.working_buffer_n] });
     }
 
     pub fn parse(self: *ParseInfo, buffer: []const u8, offset: usize) !ParseResult {
@@ -471,27 +565,27 @@ pub const Manager = struct {
     ///
     /// Set the flush flag to true if you are at the end of your memory mapped
     /// data. Otherwise this value should be false.
-    pub fn load_from_buffer(self: *Manager, buffer: []const u8, offset: usize, flush: bool) !usize {
-        var idx: usize = offset;
-        while (idx < buffer.len) {
-            var res = try self.parser.parse(buffer, idx);
-            if (res.step == .done) {
-                if (res.info) |*info_var| {
-                    try self.add_entry(info_var);
-                } else {
-                    unreachable;
-                }
-            }
-            idx += res.bytes_read;
-        }
-        if (flush) {
-            var info_op = try self.parser.flush_last();
-            if (info_op) |*info_var| {
-                try self.add_entry(info_var);
-            }
-        }
-        return idx - offset;
-    }
+    //pub fn load_from_buffer(self: *Manager, buffer: []const u8, offset: usize, flush: bool) !usize {
+    //    var idx: usize = offset;
+    //    while (idx < buffer.len) {
+    //        var res = try self.parser.parse(buffer, idx);
+    //        if (res.step == .done) {
+    //            if (res.info) |*info_var| {
+    //                try self.add_entry(info_var);
+    //            } else {
+    //                unreachable;
+    //            }
+    //        }
+    //        idx += res.bytes_read;
+    //    }
+    //    if (flush) {
+    //        var info_op = try self.parser.flush_last();
+    //        if (info_op) |*info_var| {
+    //            try self.add_entry(info_var);
+    //        }
+    //    }
+    //    return idx - offset;
+    //}
 
     /// Load the memory mapped info for the given process ID.
     pub fn load(self: *Manager, pid: usize) !void {
@@ -504,20 +598,12 @@ pub const Manager = struct {
         self.pid = pid;
         const mem_file = try std.fs.openFileAbsolute(self.map_filename, .{});
         defer mem_file.close();
-        var buffer: [1024]u8 = undefined;
-        var read_n: usize = try mem_file.read(buffer[0..]);
-        while (read_n > 0) {
-            _ = try self.load_from_buffer(buffer[0..read_n], 0, false);
-            read_n = try mem_file.read(buffer[0..]);
-        }
-        // the parser uses a newline to know the ending of a line
-        // so in the case of the last entry not having a newline
-        // we call the parser's flush_last function which will give us
-        // the last entry if it meets the right conditions to be a valid
-        // memory map entry, otherwise it returns null.
-        var info_op = try self.parser.flush_last();
-        if (info_op) |*info_var| {
-            try self.add_entry(info_var);
+        var read_buf: [2048]u8 = undefined;
+
+        var file_reader = mem_file.reader(&read_buf);
+        while (try file_reader.interface.takeDelimiter('\n')) |line| {
+            var info = try parse_map_line(self.alloc, line);
+            try self.add_entry(&info);
         }
     }
 
