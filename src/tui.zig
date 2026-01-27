@@ -14,6 +14,17 @@ const View = struct {
     procColumn: procView.ProcView,
     memView: memoryView.MemoryView,
 
+    pub fn select(self: *View) !void {
+        switch (self.focus) {
+            0 => {
+                try self.memView.set_proc(try self.procColumn.get_selected());
+            },
+            1 => {
+
+            },
+            else => {}
+        }
+    }
     pub fn change_focus(self: *View) void {
         self.focus += 1;
         self.focus = self.focus % 2;
@@ -92,6 +103,9 @@ pub fn main() !void {
                     },
                     .down => {
                         cur_view.next_selection();
+                    },
+                    .enter => {
+                        try cur_view.select();
                     },
                     .esc => running = false,
                     else => {},

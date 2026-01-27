@@ -135,7 +135,12 @@ pub fn get_processes(alloc: std.mem.Allocator) !ProcList {
     errdefer result.deinit();
     while (try it.next()) |entry| {
         if (all_digits(entry.name)) {
-            try result.add(entry.name);
+            result.add(entry.name) catch |err| {
+                if (err == error.ProcessNotFound) {
+                    continue;
+                }
+                return err;
+            };
         }
     }
     return result;

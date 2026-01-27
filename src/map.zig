@@ -52,9 +52,9 @@ pub const Info = struct {
     /// The offset.
     offset: u32 = 0,
     /// The device major version.
-    dev_major: u8 = 0,
+    dev_major: u16 = 0,
     /// The device minor version.
-    dev_minor: u8 = 0,
+    dev_minor: u16 = 0,
     /// The associated inode
     inode: u32 = 0,
 
@@ -167,7 +167,12 @@ const ParseInfo = struct {
         return result;
     }
 
+    fn err_debug(self: *ParseInfo, buffer: []const u8) void {
+        std.log.err("Error occurred with working str\n Buffer = '{s}'\n working_str = '{s}'\n", .{buffer, self.working_buffer[0..self.working_buffer_n]});
+    }
+
     pub fn parse(self: *ParseInfo, buffer: []const u8, offset: usize) !ParseResult {
+        errdefer self.err_debug(buffer);
         var result: ParseResult = .{};
         var idx: usize = offset;
         while (idx < buffer.len or self.current_step == .done) {
@@ -254,7 +259,7 @@ const ParseInfo = struct {
                     const res = self.parse_hex(buffer, idx, .dev_minor);
                     if (res.step == .dev_minor) {
                         self.current_info.dev_major = try std.fmt.parseInt(
-                            u8,
+                            u16,
                             self.working_buffer[0..self.working_buffer_n],
                             16,
                         );
@@ -267,7 +272,7 @@ const ParseInfo = struct {
                     const res = self.parse_hex(buffer, idx, .inode);
                     if (res.step == .inode) {
                         self.current_info.dev_minor = try std.fmt.parseInt(
-                            u8,
+                            u16,
                             self.working_buffer[0..self.working_buffer_n],
                             16,
                         );

@@ -49,6 +49,7 @@ pub const ProcView = struct {
         const offset_height = inner_block.height - 2;
         const offset = if (self.selected >= offset_height) self.selected - offset_height else 0;
 
+        // TODO see if we can increase the Command column size to fill up the remaining width
         const table: tui.widgets.Table = .{
             .columns = self.cols,
             .header_style = self.theme.tableHeaderStyle(),

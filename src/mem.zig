@@ -1,5 +1,6 @@
 const std = @import("std");
 const map = @import("map.zig");
+const common = @import("common.zig");
 
 /// Process memory file path.
 const MEM_FILE: []const u8 = "/proc/{}/mem";
@@ -236,7 +237,7 @@ pub const Plunder = struct {
 
     /// Get the list of region names.
     /// If a process has not been loaded, null is returned.
-    pub fn get_region_names(self: *Plunder, alloc: std.mem.Allocator) !?map.StringList {
+    pub fn get_region_names(self: *Plunder, alloc: std.mem.Allocator) !?common.StringList {
         if (self.pid == null) {
             return null;
         }
