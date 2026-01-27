@@ -61,6 +61,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // GUI app
     const dvui_dep = b.dependency("dvui", .{
         .target = target,
         .optimize = optimize,
@@ -80,6 +81,25 @@ pub fn build(b: *std.Build) void {
         }),
     });
     b.installArtifact(gui);
+
+    // TUI app
+    const zigtui_dep = b.dependency("zigtui", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const tui = b.addExecutable(.{
+        .name = "plunder-tui",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tui.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "plunder", .module = mod },
+                .{ .name = "zigtui", .module = zigtui_dep.module("zigtui") },
+            },
+        }),
+    });
+    b.installArtifact(tui);
 
     // create executable
     const exe = b.addExecutable(.{
