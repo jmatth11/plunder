@@ -66,3 +66,7 @@ the test text that is allocated in the `dummy.c` file.
 
 You can run this test with the `run_test.sh` script at the top of the repo.
 
+
+## TUI Demo
+
+https://github.com/user-attachments/assets/b5638b15-ee20-439e-beef-37de7d8a390b
