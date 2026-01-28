@@ -2,6 +2,7 @@ const std = @import("std");
 const tui = @import("zigtui");
 const procView = @import("tui/ProcView.zig");
 const memoryView = @import("tui/MemoryView.zig");
+const errorView = @import("tui/ErrorView.zig");
 const theme = tui.themes.dracula;
 
 const ErrorMessage = struct {
@@ -11,17 +12,20 @@ const ErrorMessage = struct {
 const View = struct {
     focus: usize = 0,
     err: ?ErrorMessage = null,
+
+    error_view: *errorView.ErrorView,
+    error_last_shown: i64 = 0,
+    error_msg: ?[]const u8 = null,
     procColumn: procView.ProcView,
     memView: memoryView.MemoryView,
 
     pub fn deselect(self: *View) void {
         switch (self.focus) {
-            0 => {
-            },
+            0 => {},
             1 => {
                 self.memView.deselect();
             },
-            else => {}
+            else => {},
         }
     }
 
@@ -34,7 +38,7 @@ const View = struct {
             1 => {
                 try self.memView.select();
             },
-            else => {}
+            else => {},
         }
     }
     pub fn change_focus(self: *View) void {
@@ -49,7 +53,7 @@ const View = struct {
                 self.procColumn.focused = false;
                 self.memView.focused = true;
             },
-            else => {}
+            else => {},
         }
     }
 
@@ -61,7 +65,7 @@ const View = struct {
             1 => {
                 self.memView.next_selection();
             },
-            else => {}
+            else => {},
         }
     }
     pub fn prev_selection(self: *View) void {
@@ -72,7 +76,7 @@ const View = struct {
             1 => {
                 self.memView.prev_selection();
             },
-            else => {}
+            else => {},
         }
     }
 };
@@ -91,9 +95,13 @@ pub fn main() !void {
     try terminal.hideCursor();
     defer terminal.showCursor() catch {};
 
+    var error_view = try errorView.get_error_view();
+    defer error_view.destroy();
+
     var cur_view: View = .{
         .procColumn = .init(allocator),
         .memView = .init(allocator),
+        .error_view = try errorView.get_error_view(),
     };
     defer cur_view.procColumn.deinit();
     var running = true;
@@ -139,7 +147,7 @@ pub fn main() !void {
                     .height = area.height -| 2,
                 };
                 const block: tui.widgets.Block = .{
-                    .title = "Plunder — press 'q' to quit",
+                    .title = "Plunder — 'q' for quit; j/k for down/up; tab to switch windows",
                     .style = theme.baseStyle(),
                     .borders = tui.widgets.Borders.all(),
                     .border_style = theme.borderFocusedStyle(),
@@ -172,7 +180,38 @@ pub fn main() !void {
                 view_area.x += table_area.width;
                 view_area.width = view_area.width -| table_area.width;
                 try view.memView.render(view_area, buf);
-
+                const now = std.time.milliTimestamp();
+                const diff_time = now - view.error_last_shown;
+                if (diff_time >= std.time.ms_per_s * 5) {
+                    if (view.error_msg) |msg| {
+                        view.error_view.free_msg(msg);
+                    }
+                    view.error_msg = view.error_view.pop();
+                    if (view.error_msg != null) {
+                        view.error_last_shown = std.time.milliTimestamp();
+                    }
+                }
+                if (view.error_msg) |err_msg| {
+                    const error_block: tui.widgets.Block = .{
+                        .title = "Error",
+                        .title_style = theme.errorStyle(),
+                        .border_symbols = tui.widgets.BorderSymbols.double(),
+                        .border_style = theme.borderFocusedStyle(),
+                        .borders = tui.widgets.Borders.all(),
+                        .style = theme.baseStyle(),
+                    };
+                    var top_right_area = area;
+                    top_right_area.x = top_right_area.width - 50;
+                    top_right_area.width = 50;
+                    top_right_area.height = 6;
+                    error_block.render(top_right_area, buf);
+                    const inner_error_block = error_block.inner(top_right_area);
+                    const err_paragraph: tui.widgets.Paragraph = .{
+                        .text = err_msg,
+                        .style = theme.errorStyle(),
+                    };
+                    err_paragraph.render(inner_error_block, buf);
+                }
             }
         }.render);
     }

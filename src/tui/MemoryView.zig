@@ -1,6 +1,7 @@
 const std = @import("std");
 const plunder = @import("plunder");
 const tui = @import("zigtui");
+const errorView = @import("ErrorView.zig");
 
 pub const Errors = error{
     no_process_id,
@@ -14,7 +15,7 @@ pub const RegionMemoryView = struct {
     memory: ?plunder.mem.Memory = null,
 
     pub fn load(self: *RegionMemoryView, memory: plunder.mem.Memory) void {
-        // TODO check if we need to free memory or if we should let the owner free.
+        // we do not deinitialize memory because we don't own it.
         self.memory = memory;
         self.selected = 0;
         self.scroll_offset = 0;
@@ -47,8 +48,8 @@ pub const RegionMemoryView = struct {
     pub fn render(self: *RegionMemoryView, arena: std.mem.Allocator, area: tui.Rect, buf: *tui.render.Buffer) !void {
         if (self.memory) |memory| {
             const height = area.y + area.height;
-            // minus 4 for appropriate offset.
-            // this number feels like magic, not sure why it's 4
+            // minus 4 to account for the different level of offsets.
+            // should have a better way of handling this
             const offset_height = height - 4;
             const scroll_offset_height = self.scroll_offset + offset_height;
             if (self.selected > scroll_offset_height) {
@@ -156,6 +157,7 @@ pub const RegionView = struct {
     }
     pub fn load(self: *RegionView, region: plunder.mem.Region) void {
         if (self.region) |*selected_region| {
+            // needs to be deinitialized because we own it.
             selected_region.*.deinit();
         }
         self.region = region;
@@ -320,7 +322,14 @@ pub const MemoryTable = struct {
         } else {
             const region_name = self.get_selected_name();
             if (region_name.len > 0) {
-                const selected_region = try plun.get_region_data(region_name);
+                const selected_region = plun.get_region_data(region_name) catch |err| {
+                    if (err == error.InputOutput) {
+                        const errView = try errorView.get_error_view();
+                        try errView.add("Error Input/Output:\nMemory region is not readable.\n");
+                        return;
+                    }
+                    return err;
+                };
                 if (selected_region) |region| {
                     self.region_view.load(region);
                 }
@@ -440,12 +449,13 @@ pub const MemoryView = struct {
     pub fn render(self: *MemoryView, area: tui.Rect, buf: *tui.render.Buffer) !void {
         const arena = self.arena.allocator();
         _ = self.arena.reset(.retain_capacity);
+        const title = if (self.table.region_view.is_loaded()) "Memory View - 'b' for back" else "Memory View";
         const block: tui.widgets.Block = .{
             .style = self.theme.baseStyle(),
             .borders = tui.widgets.Borders.all(),
             .border_symbols = tui.widgets.BorderSymbols.double(),
             .border_style = if (self.focused) self.theme.borderFocusedStyle() else self.theme.borderStyle(),
-            .title = "Memory View",
+            .title = title,
         };
 
         block.render(area, buf);
