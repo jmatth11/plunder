@@ -122,6 +122,11 @@ pub const RegionView = struct {
         return "";
     }
 
+    pub fn deinit(self: *RegionView) void {
+        if (self.region) |*region| {
+            region.*.deinit();
+        }
+    }
     pub fn select(self: *RegionView) void {
         if (self.region) |region| {
             if (self.region_memory_view.is_loaded()) {
@@ -373,6 +378,13 @@ pub const MemoryTable = struct {
         }
     }
 
+    pub fn deinit(self: *MemoryTable) void {
+        self.region_view.deinit();
+        if (self.list) |*list| {
+            list.*.deinit();
+        }
+    }
+
     fn get_selected_name(self: *MemoryTable) []const u8 {
         if (self.list) |list| {
             return list.items[self.selected];
@@ -470,5 +482,11 @@ pub const MemoryView = struct {
             };
             msg.render(inner_block, buf);
         }
+    }
+
+    pub fn deinit(self: *MemoryView) void {
+        self.table.deinit();
+        self.plun.deinit();
+        self.arena.deinit();
     }
 };

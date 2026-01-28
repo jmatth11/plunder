@@ -5,20 +5,42 @@ const memoryView = @import("tui/MemoryView.zig");
 const errorView = @import("tui/ErrorView.zig");
 const theme = tui.themes.dracula;
 
+/// Specific error message for top level "show-stopper" errors.
 const ErrorMessage = struct {
     msg: []const u8,
 };
 
+/// Main view structure for the TUI.
 const View = struct {
+    /// Window focus variable
     focus: usize = 0,
+    /// show-stopper error message.
     err: ?ErrorMessage = null,
 
+    /// Error view singleton for displaying errors that happen in subviews.
     error_view: *errorView.ErrorView,
+    /// timestamp of last shown error
     error_last_shown: i64 = 0,
+    /// error message currently being displayed
     error_msg: ?[]const u8 = null,
+
+    // other views
+
+    /// Proccess Column view -- List of all processes on machine.
     procColumn: procView.ProcView,
+    /// Memory view -- Handles showing memory regions and memory for a process.
     memView: memoryView.MemoryView,
 
+    pub fn deinit(self: *View) void {
+        if (self.error_msg) |err_msg| {
+            self.error_view.free_msg(err_msg);
+            self.error_msg = null;
+        }
+        self.procColumn.deinit();
+        self.memView.deinit();
+    }
+
+    /// Deselect action
     pub fn deselect(self: *View) void {
         switch (self.focus) {
             0 => {},
@@ -29,6 +51,7 @@ const View = struct {
         }
     }
 
+    /// Select action
     pub fn select(self: *View) !void {
         switch (self.focus) {
             0 => {
@@ -41,6 +64,8 @@ const View = struct {
             else => {},
         }
     }
+
+    /// Change focus to next view.
     pub fn change_focus(self: *View) void {
         self.focus += 1;
         self.focus = self.focus % 2;
@@ -57,6 +82,7 @@ const View = struct {
         }
     }
 
+    /// Next selection action.
     pub fn next_selection(self: *View) void {
         switch (self.focus) {
             0 => {
@@ -68,6 +94,7 @@ const View = struct {
             else => {},
         }
     }
+    /// Previous selection action.
     pub fn prev_selection(self: *View) void {
         switch (self.focus) {
             0 => {
@@ -86,24 +113,25 @@ pub fn main() !void {
     //defer _ = gpa.deinit();
     const allocator = std.heap.smp_allocator;
 
+    // terminal setup
     var backend = try tui.backend.init(allocator);
     defer backend.deinit();
-
     var terminal = try tui.terminal.Terminal.init(allocator, backend.interface());
     defer terminal.deinit();
-
     try terminal.hideCursor();
     defer terminal.showCursor() catch {};
 
+    // create error view singleton
     var error_view = try errorView.get_error_view();
     defer error_view.destroy();
 
+    // instantiate our main view.
     var cur_view: View = .{
         .procColumn = .init(allocator),
         .memView = .init(allocator),
         .error_view = try errorView.get_error_view(),
     };
-    defer cur_view.procColumn.deinit();
+    defer cur_view.deinit();
     var running = true;
     while (running) {
         const event = try backend.interface().pollEvent(100);
