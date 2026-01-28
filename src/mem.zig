@@ -118,6 +118,43 @@ pub const Memory = struct {
         try writer.*.flush();
     }
 
+    pub fn hex_dump_line(self: *Memory, alloc: std.mem.Allocator, line_offset: usize) !?[]const u8 {
+        if (self.buffer == null) {
+            return Errors.memory_buffer_not_set;
+        }
+        const offset: usize = line_offset * 16;
+        const base_addr: usize = self.info.start_addr + self.starting_offset;
+        const buffer: [1024]u8 = @splat(0);
+        const writer: std.io.Writer = .fixed(buffer);
+        try writer.print("{X:0>12} ", .{base_addr + offset});
+        var byte_idx: usize = 0;
+        while (byte_idx < 16) : (byte_idx += 1) {
+            const idx: usize = offset + byte_idx;
+            if (idx < self.buffer.?.len) {
+                try writer.print("{X:0>2} ", .{self.buffer.?[idx]});
+            } else {
+                _ = try writer.write("   ");
+            }
+        }
+        byte_idx = 0;
+        _ = try writer.write("|");
+        while (byte_idx < 16) : (byte_idx += 1) {
+            const idx: usize = offset + byte_idx;
+            if (idx < self.buffer.?.len) {
+                const local_char: u8 = self.buffer.?[idx];
+                if (local_char >= 33 and local_char <= 126) {
+                    try writer.print("{c}", .{self.buffer.?[idx]});
+                } else {
+                    _ = try writer.write(".");
+                }
+            } else {
+                _ = try writer.write(".");
+            }
+        }
+        _ = try writer.write("|\n");
+        return try alloc.dupe(u8, buffer[0..writer.end]);
+    }
+
     /// Deinitialize.
     pub fn deinit(self: *Memory) void {
         self.info.deinit();

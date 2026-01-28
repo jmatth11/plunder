@@ -47,7 +47,7 @@ const View = struct {
                 self.procColumn.next_selection();
             },
             1 => {
-
+                self.memView.next_selection();
             },
             else => {}
         }
@@ -58,7 +58,7 @@ const View = struct {
                 self.procColumn.prev_selection();
             },
             1 => {
-
+                self.memView.prev_selection();
             },
             else => {}
         }
