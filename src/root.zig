@@ -6,10 +6,10 @@ pub const mem = @import("mem.zig");
 pub const network = @import("network.zig");
 /// helper functions to interact with processes.
 pub const proc = @import("proc.zig");
+/// Common structures and functions.
+pub const common = @import("common.zig");
 /// Plunder structure to grab memory from a running process.
 /// Most interactions will be done through this structure.
 pub const Plunder = mem.Plunder;
-/// List of strings type.
-pub const StringList = map.StringList;
 /// List of Memory structure type.
 pub const MemoryList = mem.MemoryList;

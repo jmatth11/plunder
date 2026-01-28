@@ -1,0 +1,2 @@
+- [ ] Properly handle proc objects/info if proc comes down after our first query
+- [ ] Redo unit tests in map.zig to use new parse_map_line function for testing.

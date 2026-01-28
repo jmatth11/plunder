@@ -4,6 +4,10 @@
     .fingerprint = 0xda6c3f5838b79c5,
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
+        .zigtui = .{
+            .url = "git+https://github.com/adxdits/zigtui?ref=master#25e5e11496a5dc98f929768a22c1d17e752cb78b",
+            .hash = "zigtui-0.1.0-U55PSImFAgBCk_ZXdlGYlX0S415PVQqXr-_FuD_u3dq-",
+        },
     },
     .paths = .{
         "build.zig",

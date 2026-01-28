@@ -142,18 +142,21 @@ fn get_socket_inodes(alloc: std.mem.Allocator, pid: usize) ![]usize {
     defer fixed_buffer.reset();
 
     const fp = try std.fmt.allocPrint(f_alloc, fd_path, .{pid});
-    var dir = try std.fs.openDirAbsolute(fp, .{ .iterate = true });
+    var dir = try std.fs.openDirAbsolute(fp, .{
+        .iterate = true,
+        .access_sub_paths = false,
+        .no_follow = true,
+    });
     defer dir.close();
     f_alloc.free(fp);
-    var walker = try dir.walk(f_alloc);
-    defer walker.deinit();
+    var it = dir.iterate();
 
     var result: std.array_list.Managed(usize) = .init(alloc);
     errdefer result.deinit();
 
-    while (try walker.next()) |entry| {
+    while (try it.next()) |entry| {
         var link: [1024]u8 = undefined;
-        const link_slice = try dir.readLink(entry.basename, &link);
+        const link_slice = try dir.readLink(entry.name, &link);
         if (std.mem.startsWith(u8, link_slice, "socket:[")) {
             const inode = try std.fmt.parseInt(usize, link_slice[8..(link_slice.len - 1)], 10);
             try result.append(inode);
@@ -166,7 +169,7 @@ fn get_socket_inodes(alloc: std.mem.Allocator, pid: usize) ![]usize {
 }
 
 /// Convenience function to check if inode is in inodes list.
-fn has_inode(inodes: []usize, inode: usize) !bool {
+fn has_inode(inodes: []usize, inode: usize) bool {
     for (inodes) |entry| {
         if (entry == inode) {
             return true;
@@ -234,7 +237,7 @@ fn parse_network_line(network_type: NetworkType, line: []const u8, inodes: []usi
     }
     const inode_str = parser.until(' ');
     const inode = try std.fmt.parseInt(usize, inode_str, 10);
-    if (try has_inode(inodes, inode)) {
+    if (has_inode(inodes, inode)) {
         const info: NetworkInfo = .{
             .inode = inode,
             .state = @enumFromInt(try std.fmt.parseInt(u16, state, 16)),
