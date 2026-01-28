@@ -132,9 +132,13 @@ pub fn main() !void {
         .error_view = try errorView.get_error_view(),
     };
     defer cur_view.deinit();
+
+    // main loop
     var running = true;
     while (running) {
+        // poll every 100 milliseconds
         const event = try backend.interface().pollEvent(100);
+        // handle key events
         switch (event) {
             .key => |key| {
                 switch (key.code) {
@@ -165,6 +169,7 @@ pub fn main() !void {
             },
             else => {},
         }
+        // draw terminal
         try terminal.draw(&cur_view, struct {
             fn render(view: *View, buf: *tui.render.Buffer) anyerror!void {
                 const area = buf.getArea();
@@ -174,6 +179,7 @@ pub fn main() !void {
                     .width = area.width -| 2,
                     .height = area.height -| 2,
                 };
+                // setup main block
                 const block: tui.widgets.Block = .{
                     .title = "Plunder — 'q' for quit; j/k for down/up; tab to switch windows",
                     .style = theme.baseStyle(),
@@ -193,6 +199,7 @@ pub fn main() !void {
                     return;
                 }
 
+                // render process column
                 var table_area = inner;
                 table_area.width = @intFromFloat(@floor(@as(f32, @floatFromInt(inner.width)) * 0.3));
                 view.procColumn.render(table_area, buf) catch |err| {
@@ -204,12 +211,16 @@ pub fn main() !void {
                     }
                 };
 
+                // render memory view
                 var view_area = inner;
                 view_area.x += table_area.width;
                 view_area.width = view_area.width -| table_area.width;
                 try view.memView.render(view_area, buf);
+
+                // render error messages
                 const now = std.time.milliTimestamp();
                 const diff_time = now - view.error_last_shown;
+                // clear after 5 seconds
                 if (diff_time >= std.time.ms_per_s * 5) {
                     if (view.error_msg) |msg| {
                         view.error_view.free_msg(msg);

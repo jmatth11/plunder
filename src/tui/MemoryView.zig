@@ -3,17 +3,24 @@ const plunder = @import("plunder");
 const tui = @import("zigtui");
 const errorView = @import("ErrorView.zig");
 
+/// Errors related to Memory view and subviews.
 pub const Errors = error{
     no_process_id,
     empty_region_name,
 };
 
+/// Structure to handle rendering the Memory within a region
 pub const RegionMemoryView = struct {
+    /// main theme
     theme: tui.Theme = tui.themes.dracula,
+    /// Currently selected line
     selected: usize = 0,
+    /// Scroll offset
     scroll_offset: usize = 0,
+    /// Currently loaded memory structure.
     memory: ?plunder.mem.Memory = null,
 
+    /// Load a new memory to render.
     pub fn load(self: *RegionMemoryView, memory: plunder.mem.Memory) void {
         // we do not deinitialize memory because we don't own it.
         self.memory = memory;
@@ -21,30 +28,36 @@ pub const RegionMemoryView = struct {
         self.scroll_offset = 0;
     }
 
+    /// Unload the current memory.
     pub fn unload(self: *RegionMemoryView) void {
         self.memory = null;
     }
-    fn get_region_line_len(self: *RegionMemoryView) usize {
+    /// Get the line length for display.
+    fn get_line_len(self: *RegionMemoryView) usize {
         if (self.memory) |memory| {
             return memory.buffer.?.len / 16;
         }
         return 0;
     }
+    /// Next selection action.
     pub fn next_selection(self: *RegionMemoryView) void {
         if (self.memory != null) {
             self.selected += 1;
-            self.selected = self.selected % self.get_region_line_len();
+            self.selected = self.selected % self.get_line_len();
         }
     }
+    /// Previous selection action.
     pub fn prev_selection(self: *RegionMemoryView) void {
         if (self.memory != null) {
             if (self.selected == 0) {
-                self.selected = self.get_region_line_len() - 1;
+                self.selected = self.get_line_len() - 1;
             } else {
                 self.selected -= 1;
             }
         }
     }
+
+    /// Render functions for memory
     pub fn render(self: *RegionMemoryView, arena: std.mem.Allocator, area: tui.Rect, buf: *tui.render.Buffer) !void {
         if (self.memory) |memory| {
             const height = area.y + area.height;
@@ -84,30 +97,36 @@ pub const RegionMemoryView = struct {
         }
         // TODO maybe think of "edit" mode to mimic model view controller style
     }
+
+    /// Is memory view currently loaded with a memory.
     pub fn is_loaded(self: *RegionMemoryView) bool {
         return self.memory != null;
     }
 };
 
+/// Structure for displaying the list of memory blocks for a Region (if there
+/// are multiple)
 pub const RegionView = struct {
+    /// main theme
     theme: tui.Theme = tui.themes.dracula,
+    /// currently selected line
     selected: usize = 0,
+    /// scroll offset
     scroll_offset: usize = 0,
+    /// Currently loaded Region.
     region: ?plunder.mem.Region = null,
+    /// The region memory view.
     region_memory_view: RegionMemoryView = .{},
 
+    /// Get the line length of the list of memory blocks for a region.
     fn get_region_line_len(self: *RegionView) usize {
         if (self.region) |region| {
-            const count = region.memory.items.len;
-            if (count == 1) {
-                const memory = region.memory.items[0];
-                return memory.buffer.?.len / 16;
-            }
-            return count;
+            return region.memory.items.len;
         }
         return 0;
     }
 
+    /// Get the name of the process for the currently selected Region.
     fn get_selected_name(self: *RegionView) []const u8 {
         if (self.region) |region| {
             if (region.memory.items.len > 0) {
@@ -122,11 +141,14 @@ pub const RegionView = struct {
         return "";
     }
 
+    /// cleanup
     pub fn deinit(self: *RegionView) void {
         if (self.region) |*region| {
             region.*.deinit();
         }
     }
+
+    /// Select action.
     pub fn select(self: *RegionView) void {
         if (self.region) |region| {
             if (self.region_memory_view.is_loaded()) {
@@ -137,6 +159,7 @@ pub const RegionView = struct {
         }
     }
 
+    /// Next selection action
     pub fn next_selection(self: *RegionView) void {
         if (self.region_memory_view.is_loaded()) {
             self.region_memory_view.next_selection();
@@ -147,6 +170,7 @@ pub const RegionView = struct {
             }
         }
     }
+    /// Previous selection action
     pub fn prev_selection(self: *RegionView) void {
         if (self.region_memory_view.is_loaded()) {
             self.region_memory_view.prev_selection();
@@ -160,6 +184,7 @@ pub const RegionView = struct {
             }
         }
     }
+    /// Load a Region to view.
     pub fn load(self: *RegionView, region: plunder.mem.Region) void {
         if (self.region) |*selected_region| {
             // needs to be deinitialized because we own it.
@@ -169,11 +194,13 @@ pub const RegionView = struct {
         self.selected = 0;
         self.scroll_offset = 0;
         if (self.region) |local_region| {
+            // if there is only one memory block, automatically jump into it.
             if (local_region.memory.items.len == 1) {
                 self.region_memory_view.load(local_region.memory.items[0]);
             }
         }
     }
+    /// Unload the current region.
     pub fn unload(self: *RegionView) void {
         if (self.region) |*selected_region| {
             if (self.region_memory_view.is_loaded()) {
@@ -188,12 +215,15 @@ pub const RegionView = struct {
             self.region = null;
         }
     }
+    /// Is the region view currently loaded.
     pub fn is_loaded(self: *RegionView) bool {
         return self.region != null;
     }
 
+    /// Main render function for the region view.
     pub fn render(self: *RegionView, arena: std.mem.Allocator, area: tui.Rect, buf: *tui.render.Buffer) !void {
         if (self.region) |selected_region| {
+            // show process name.
             buf.setString(
                 area.x,
                 area.y,
@@ -202,13 +232,15 @@ pub const RegionView = struct {
             );
             // check if memory is loaded currently
             if (self.region_memory_view.is_loaded()) {
+                // if loaded only load subview
                 try self.region_memory_view.render(arena, area, buf);
                 return;
             }
             const height = area.y + area.height;
             // minus 4 for appropriate offset.
-            // this number feels like magic, not sure why it's 4
+            // should be a better way to get this
             const offset_height = height - 4;
+            // handle scroll offset
             const scroll_offset_height = self.scroll_offset + offset_height;
             if (self.selected > scroll_offset_height) {
                 self.scroll_offset = self.selected - offset_height;
@@ -218,6 +250,7 @@ pub const RegionView = struct {
             var offset_area = area;
             offset_area.y += 1;
             if (selected_region.memory.items.len > 1) {
+                // build and show list of memory blocks and their permissions for a given region.
                 for (selected_region.memory.items, 0..) |memory, idx| {
                     if (offset_area.y >= height) {
                         break;
@@ -258,6 +291,7 @@ pub const RegionView = struct {
         }
     }
 
+    /// Generate permission string for a given memory.
     fn gen_permission_str(_: *RegionView, arena: std.mem.Allocator, memory: plunder.mem.Memory) ![]const u8 {
         var rd: u8 = '-';
         if (memory.info.is_read()) {
@@ -279,35 +313,43 @@ pub const RegionView = struct {
     }
 };
 
+/// Memory table view
 pub const MemoryTable = struct {
+    /// main theme
     theme: tui.Theme = tui.themes.dracula,
+    /// currently selected line.
     selected: usize = 0,
+    /// The region subview.
     region_view: RegionView = .{},
-    list: ?plunder.common.StringList = null,
+    /// List of region names
+    region_names: ?plunder.common.StringList = null,
 
+    /// Load the given list of region names.
     pub fn load(self: *MemoryTable, list: plunder.common.StringList) void {
-        if (self.list) |local_list| {
+        if (self.region_names) |local_list| {
             local_list.deinit();
         }
-        self.list = list;
+        self.region_names = list;
     }
 
+    /// Next selection action.
     pub fn next_selection(self: *MemoryTable) void {
         if (self.region_view.is_loaded()) {
             self.region_view.next_selection();
         } else {
-            if (self.list) |list| {
+            if (self.region_names) |list| {
                 self.selected += 1;
                 self.selected = self.selected % list.items.len;
             }
         }
     }
 
+    /// Previous selection action.
     pub fn prev_selection(self: *MemoryTable) void {
         if (self.region_view.is_loaded()) {
             self.region_view.prev_selection();
         } else {
-            if (self.list) |list| {
+            if (self.region_names) |list| {
                 if (self.selected == 0) {
                     self.selected = list.items.len - 1;
                 } else {
@@ -317,10 +359,12 @@ pub const MemoryTable = struct {
         }
     }
 
+    /// Deselect action.
     pub fn deselect(self: *MemoryTable) void {
         self.region_view.unload();
     }
 
+    /// Select action.
     pub fn select(self: *MemoryTable, plun: *plunder.Plunder) !void {
         if (self.region_view.is_loaded()) {
             self.region_view.select();
@@ -328,6 +372,9 @@ pub const MemoryTable = struct {
             const region_name = self.get_selected_name();
             if (region_name.len > 0) {
                 const selected_region = plun.get_region_data(region_name) catch |err| {
+                    // certain memory regions like "vsyscall" are legacy emulation regions
+                    // and we are not allowed to
+                    // TODO finish
                     if (err == error.InputOutput) {
                         const errView = try errorView.get_error_view();
                         try errView.add("Error Input/Output:\nMemory region is not readable.\n");
@@ -349,7 +396,7 @@ pub const MemoryTable = struct {
             try self.region_view.render(arena, area, buf);
             return;
         }
-        if (self.list) |list| {
+        if (self.region_names) |list| {
             const cols: []const tui.widgets.Column = &.{
                 tui.widgets.Column{
                     .header = "Region Name",
@@ -380,13 +427,13 @@ pub const MemoryTable = struct {
 
     pub fn deinit(self: *MemoryTable) void {
         self.region_view.deinit();
-        if (self.list) |*list| {
+        if (self.region_names) |*list| {
             list.*.deinit();
         }
     }
 
     fn get_selected_name(self: *MemoryTable) []const u8 {
-        if (self.list) |list| {
+        if (self.region_names) |list| {
             return list.items[self.selected];
         }
         return "";

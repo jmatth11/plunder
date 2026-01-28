@@ -2,21 +2,33 @@ const std = @import("std");
 const plunder = @import("plunder");
 const tui = @import("zigtui");
 
+/// Errors related to Process View
 pub const Errors = error{
     uninitialized_procs,
 };
 
+/// Main process view structure.
 pub const ProcView = struct {
+    /// regular allocator
     alloc: std.mem.Allocator,
+    /// arena allocator
     arena: std.heap.ArenaAllocator,
+    /// list of processes
     procs: ?plunder.proc.ProcList = null,
+    /// main theme
     theme: tui.Theme = tui.themes.dracula,
+    /// generated rows for process table
     rows: ?[]tui.widgets.Row = null,
+    /// col headers for process table
     cols: []const tui.widgets.Column,
+    /// currently selected item
     selected: usize = 0,
+    /// scroll offset in table
     scroll_offset: usize = 0,
+    /// flag for focus (controlled by parent)
     focused: bool = true,
 
+    /// initialize the process view
     pub fn init(alloc: std.mem.Allocator) ProcView {
         const result: ProcView = .{
             .alloc = alloc,
@@ -33,7 +45,9 @@ pub const ProcView = struct {
         return result;
     }
 
+    /// Main render function for process view
     pub fn render(self: *ProcView, area: tui.Rect, buf: *tui.render.Buffer) !void {
+        // create containing block
         const block: tui.widgets.Block = .{
             .style = self.theme.baseStyle(),
             .borders = tui.widgets.Borders.all(),
@@ -44,9 +58,12 @@ pub const ProcView = struct {
 
         block.render(area, buf);
 
+        // generate rows
         try self.gen_rows();
 
+        // get inner area for the table
         const inner_block = block.inner(area);
+        // figure out offset position
         const offset_height = inner_block.height - 2;
         const scroll_offset_height = self.scroll_offset + offset_height;
         if (self.selected > scroll_offset_height) {
@@ -63,10 +80,10 @@ pub const ProcView = struct {
             .selected = self.selected,
             .offset = self.scroll_offset,
         };
-
         table.render(inner_block, buf);
     }
 
+    /// Get the selected item in the process table
     pub fn get_selected(self: *ProcView) Errors!plunder.proc.ProcInfo {
         if (self.procs) |procs| {
             return procs.procs.items[self.selected];
@@ -74,12 +91,14 @@ pub const ProcView = struct {
         return Errors.uninitialized_procs;
     }
 
+    /// Next selection action
     pub fn next_selection(self: *ProcView) void {
         if (self.rows) |rows| {
             self.selected += 1;
             self.selected = self.selected % rows.len;
         }
     }
+    /// Previous selection action
     pub fn prev_selection(self: *ProcView) void {
         if (self.rows) |rows| {
             if (self.selected == 0) {
@@ -90,6 +109,7 @@ pub const ProcView = struct {
         }
     }
 
+    /// Cleanup
     pub fn deinit(self: *ProcView) void {
         self.arena.deinit();
         if (self.rows) |rows| {
@@ -98,9 +118,11 @@ pub const ProcView = struct {
         }
     }
 
+    /// Generate rows for the table
     fn gen_rows(self: *ProcView) !void {
         if (self.rows == null) {
             // TODO not sure if I like this
+            // Generate process list lazily
             if (self.procs == null) {
                 self.procs = try plunder.proc.get_processes(self.alloc);
             }
@@ -111,6 +133,7 @@ pub const ProcView = struct {
                     procs_list.procs.items.len,
                 );
                 for (procs_list.procs.items, 0..) |proc, idx| {
+                    // use arena allocator so we can bulk cleanup every frame
                     const pid_str: []const u8 = try std.fmt.allocPrint(
                         self.arena.allocator(),
                         "{}",
