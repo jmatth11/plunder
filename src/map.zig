@@ -50,7 +50,7 @@ pub const Info = struct {
     /// The permissions the memory mapped region has.
     perm: u8 = 0,
     /// The offset.
-    offset: u32 = 0,
+    offset: usize = 0,
     /// The device major version.
     dev_major: u16 = 0,
     /// The device minor version.
@@ -204,7 +204,7 @@ fn parse_map_line(alloc: std.mem.Allocator, line: []const u8) !Info {
 
     const offset = parser.until(' ');
     result.offset = try std.fmt.parseInt(
-        u32,
+        usize,
         offset,
         16,
     );
