@@ -14,13 +14,25 @@ const View = struct {
     procColumn: procView.ProcView,
     memView: memoryView.MemoryView,
 
+    pub fn deselect(self: *View) void {
+        switch (self.focus) {
+            0 => {
+            },
+            1 => {
+                self.memView.deselect();
+            },
+            else => {}
+        }
+    }
+
     pub fn select(self: *View) !void {
         switch (self.focus) {
             0 => {
                 try self.memView.set_proc(try self.procColumn.get_selected());
+                self.change_focus();
             },
             1 => {
-
+                try self.memView.select();
             },
             else => {}
         }
@@ -94,6 +106,7 @@ pub fn main() !void {
                         if (c == 'q' or c == 'Q') running = false;
                         if (c == 'j') cur_view.next_selection();
                         if (c == 'k') cur_view.prev_selection();
+                        if (c == 'b') cur_view.deselect();
                     },
                     .tab => {
                         cur_view.change_focus();

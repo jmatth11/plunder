@@ -14,6 +14,7 @@ pub const ProcView = struct {
     rows: ?[]tui.widgets.Row = null,
     cols: []const tui.widgets.Column,
     selected: usize = 0,
+    scroll_offset: usize = 0,
     focused: bool = true,
 
     pub fn init(alloc: std.mem.Allocator) ProcView {
@@ -47,8 +48,12 @@ pub const ProcView = struct {
 
         const inner_block = block.inner(area);
         const offset_height = inner_block.height - 2;
-        const offset = if (self.selected >= offset_height) self.selected - offset_height else 0;
-
+        const scroll_offset_height = self.scroll_offset + offset_height;
+        if (self.selected > scroll_offset_height) {
+            self.scroll_offset = self.selected - offset_height;
+        } else if (self.selected < self.scroll_offset) {
+            self.scroll_offset = self.selected;
+        }
         // TODO see if we can increase the Command column size to fill up the remaining width
         const table: tui.widgets.Table = .{
             .columns = self.cols,
@@ -56,7 +61,7 @@ pub const ProcView = struct {
             .rows = self.rows.?,
             .selected_style = self.theme.selectionStyle(),
             .selected = self.selected,
-            .offset = offset,
+            .offset = self.scroll_offset,
         };
 
         table.render(inner_block, buf);

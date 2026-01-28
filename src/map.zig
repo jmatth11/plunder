@@ -248,301 +248,6 @@ fn parse_map_line(alloc: std.mem.Allocator, line: []const u8) !Info {
 
     return result;
 }
-const ParseInfo = struct {
-    alloc: std.mem.Allocator,
-    current_step: ParseStep = .nothing,
-    current_info: Info = .{},
-    working_buffer: [1024]u8 = undefined,
-    working_buffer_n: usize = 0,
-
-    pub fn init(alloc: std.mem.Allocator) ParseInfo {
-        const result: ParseInfo = .{
-            .alloc = alloc,
-        };
-        return result;
-    }
-
-    fn err_debug(self: *ParseInfo, buffer: []const u8) void {
-        std.log.err("Error occurred with working str\n Buffer = '{s}'\n working_str = '{s}'\n", .{ buffer, self.working_buffer[0..self.working_buffer_n] });
-    }
-
-    pub fn parse(self: *ParseInfo, buffer: []const u8, offset: usize) !ParseResult {
-        errdefer self.err_debug(buffer);
-        var result: ParseResult = .{};
-        var idx: usize = offset;
-        while (idx < buffer.len or self.current_step == .done) {
-            var done: bool = false;
-            switch (self.current_step) {
-                ParseStep.nothing => {
-                    self.current_step = .start_addr;
-                    self.current_info = Info.init(self.alloc);
-                    self.working_buffer_n = 0;
-                },
-                ParseStep.start_addr => {
-                    const res = self.parse_hex(buffer, idx, .end_addr);
-                    if (res.step == .end_addr) {
-                        self.current_info.start_addr = try std.fmt.parseInt(
-                            u64,
-                            self.working_buffer[0..self.working_buffer_n],
-                            16,
-                        );
-                        self.working_buffer_n = 0;
-                    }
-                    idx += res.bytes_read;
-                    self.current_step = res.step;
-                },
-                ParseStep.end_addr => {
-                    const res = self.parse_hex(buffer, idx, .perm_read);
-                    if (res.step == .perm_read) {
-                        self.current_info.end_addr = try std.fmt.parseInt(
-                            u64,
-                            self.working_buffer[0..self.working_buffer_n],
-                            16,
-                        );
-                        self.working_buffer_n = 0;
-                    }
-                    idx += res.bytes_read;
-                    self.current_step = res.step;
-                },
-                ParseStep.perm_read => {
-                    const res = try ParseInfo.parse_permission(buffer, idx, 'r');
-                    if (res) {
-                        self.current_info.set_read();
-                    }
-                    idx += 1;
-                    self.current_step = .perm_write;
-                },
-                ParseStep.perm_write => {
-                    const res = try ParseInfo.parse_permission(buffer, idx, 'w');
-                    if (res) {
-                        self.current_info.set_write();
-                    }
-                    idx += 1;
-                    self.current_step = .perm_execute;
-                },
-                ParseStep.perm_execute => {
-                    const res = try ParseInfo.parse_permission(buffer, idx, 'x');
-                    if (res) {
-                        self.current_info.set_execute();
-                    }
-                    idx += 1;
-                    self.current_step = .perm_shared;
-                },
-                ParseStep.perm_shared => {
-                    const res = try ParseInfo.parse_permission(buffer, idx, 's');
-                    if (res) {
-                        self.current_info.set_shared();
-                    }
-                    // skip 2 to skip next whitespace.
-                    idx += 2;
-                    self.current_step = .offset;
-                },
-                ParseStep.offset => {
-                    const res = self.parse_hex(buffer, idx, .dev_major);
-                    if (res.step == .dev_major) {
-                        self.current_info.offset = try std.fmt.parseInt(
-                            u32,
-                            self.working_buffer[0..self.working_buffer_n],
-                            16,
-                        );
-                        self.working_buffer_n = 0;
-                    }
-                    idx += res.bytes_read;
-                    self.current_step = res.step;
-                },
-                ParseStep.dev_major => {
-                    const res = self.parse_hex(buffer, idx, .dev_minor);
-                    if (res.step == .dev_minor) {
-                        self.current_info.dev_major = try std.fmt.parseInt(
-                            u16,
-                            self.working_buffer[0..self.working_buffer_n],
-                            16,
-                        );
-                        self.working_buffer_n = 0;
-                    }
-                    idx += res.bytes_read;
-                    self.current_step = res.step;
-                },
-                ParseStep.dev_minor => {
-                    const res = self.parse_hex(buffer, idx, .inode);
-                    if (res.step == .inode) {
-                        self.current_info.dev_minor = try std.fmt.parseInt(
-                            u16,
-                            self.working_buffer[0..self.working_buffer_n],
-                            16,
-                        );
-                        self.working_buffer_n = 0;
-                    }
-                    idx += res.bytes_read;
-                    self.current_step = res.step;
-                },
-                ParseStep.inode => {
-                    const res = self.parse_number(buffer, idx, .process);
-                    if (res.step == .process) {
-                        self.current_info.inode = try std.fmt.parseInt(
-                            u32,
-                            self.working_buffer[0..self.working_buffer_n],
-                            10,
-                        );
-                        self.working_buffer_n = 0;
-                    }
-                    idx += res.bytes_read;
-                    // sometimes inode can be the last value.
-                    if ((idx >= buffer.len and buffer[buffer.len - 1] == '\n')) {
-                        self.current_step = .done;
-                        self.current_info.pathname = UNDEFINED_NAME;
-                    } else {
-                        self.current_step = res.step;
-                    }
-                },
-                ParseStep.process => {
-                    if (buffer[idx] == '\n') {
-                        idx += 1;
-                        self.current_step = .done;
-                        self.current_info.pathname = UNDEFINED_NAME;
-                    } else {
-                        idx += ParseInfo.skip_whitespace(buffer, idx);
-                        const res = self.parse_path(buffer, idx, .done);
-                        if (res.step == .done) {
-                            self.current_info.pathname = try self.alloc.dupe(
-                                u8,
-                                self.working_buffer[0..self.working_buffer_n],
-                            );
-                            self.working_buffer_n = 0;
-                        }
-                        idx += res.bytes_read;
-                        self.current_step = res.step;
-                    }
-                },
-                ParseStep.done => {
-                    done = true;
-                    result.step = .done;
-                    result.info = self.current_info;
-                    self.current_step = .nothing;
-                },
-            }
-            if (done) {
-                break;
-            }
-        }
-        if (result.step != .done) {
-            result.step = self.current_step;
-        }
-        result.bytes_read = idx - offset;
-        return result;
-    }
-
-    pub fn flush_last(self: *ParseInfo) !?Info {
-        if (self.current_step == .process) {
-            self.current_info.pathname = try self.alloc.dupe(
-                u8,
-                self.working_buffer[0..self.working_buffer_n],
-            );
-            self.working_buffer_n = 0;
-            self.current_step = .nothing;
-            return self.current_info;
-        } else if (self.current_step == .inode) {
-            // if we flush on .inode it's an unamed mapping
-            self.current_info.pathname = UNDEFINED_NAME;
-            self.working_buffer_n = 0;
-            self.current_step = .nothing;
-            return self.current_info;
-        }
-        return null;
-    }
-
-    pub fn reset_state(self: *ParseInfo) void {
-        self.current_step = .nothing;
-        self.working_buffer_n = 0;
-    }
-
-    pub fn getInfo(self: *ParseInfo) ?Info {
-        if (self.current_step == .done) {
-            return self.current_info;
-        }
-        return null;
-    }
-
-    fn skip_whitespace(buffer: []const u8, offset: usize) usize {
-        var idx: usize = offset;
-        while (idx < buffer.len) : (idx += 1) {
-            if (!std.ascii.isWhitespace(buffer[idx])) {
-                break;
-            }
-        }
-        return idx - offset;
-    }
-
-    fn parse_path(self: *ParseInfo, buffer: []const u8, offset: usize, next_step: ParseStep) ParseResult {
-        var result: ParseResult = .{ .step = self.current_step };
-        var idx: usize = offset;
-        while (idx < buffer.len) : (idx += 1) {
-            if (buffer[idx] != '\n') {
-                self.working_buffer[self.working_buffer_n] = buffer[idx];
-                self.working_buffer_n += 1;
-            } else {
-                result.step = next_step;
-                break;
-            }
-        }
-        result.bytes_read = idx - offset;
-        // add one extra if we completed the parse to move past the hyphen char.
-        if (result.step == next_step) {
-            result.bytes_read += 1;
-        }
-        return result;
-    }
-
-    fn parse_number(self: *ParseInfo, buffer: []const u8, offset: usize, next_step: ParseStep) ParseResult {
-        var result: ParseResult = .{ .step = self.current_step };
-        var idx: usize = offset;
-        while (idx < buffer.len) : (idx += 1) {
-            if (std.ascii.isDigit(buffer[idx])) {
-                self.working_buffer[self.working_buffer_n] = buffer[idx];
-                self.working_buffer_n += 1;
-            } else {
-                result.step = next_step;
-                break;
-            }
-        }
-        result.bytes_read = idx - offset;
-        // add one extra if we completed the parse to move past the hyphen char.
-        if (result.step == next_step) {
-            result.bytes_read += 1;
-        }
-        return result;
-    }
-
-    fn parse_hex(self: *ParseInfo, buffer: []const u8, offset: usize, next_step: ParseStep) ParseResult {
-        var result: ParseResult = .{ .step = self.current_step };
-        var idx: usize = offset;
-        self.working_buffer_n = 0;
-        while (idx < buffer.len) : (idx += 1) {
-            if (std.ascii.isAlphanumeric(buffer[idx])) {
-                self.working_buffer[self.working_buffer_n] = buffer[idx];
-                self.working_buffer_n += 1;
-            } else {
-                result.step = next_step;
-                break;
-            }
-        }
-        result.bytes_read = idx - offset;
-        // add one extra if we completed the parse to move past the hyphen char.
-        if (result.step == next_step) {
-            result.bytes_read += 1;
-        }
-        return result;
-    }
-
-    fn parse_permission(buffer: []const u8, offset: usize, compare_char: u8) Errors!bool {
-        if (buffer[offset] == compare_char) {
-            return true;
-        } else if (buffer[offset] != '-' and buffer[offset] != 'p') {
-            return Errors.malformed_permissions;
-        }
-        return false;
-    }
-};
 
 /// Manager structure to read memory mapped info for a given process.
 pub const Manager = struct {
@@ -550,14 +255,12 @@ pub const Manager = struct {
     collection: InfoHash,
     pid: ?usize = null,
     map_filename: []const u8 = undefined,
-    parser: ParseInfo = undefined,
 
     /// Initialize manager with allocator.
     pub fn init(alloc: std.mem.Allocator) Manager {
         const result: Manager = .{
             .alloc = alloc,
             .collection = InfoHash.init(alloc),
-            .parser = .init(alloc),
         };
         return result;
     }
@@ -657,152 +360,152 @@ pub const Manager = struct {
 
 const testing = std.testing;
 
-test "parse info one line with new line, program read/private" {
-    const expected_pathname: []const u8 = "/home/user/main";
-    const value: []const u8 = "5a4b2d4fd000-5a4b2d4fe000 r--p 00000000 08:30 432226                     /home/user/main\n";
-    var parser: ParseInfo = .init(testing.allocator);
-    const result = try parser.parse(value, 0);
-    try testing.expect(result.info != null);
-    var info: Info = result.info.?;
-    defer info.deinit();
-    try testing.expectEqual(value.len, result.bytes_read);
-    try testing.expectEqual(ParseStep.done, result.step);
-    try testing.expectEqual(info.start_addr, 99278929252352);
-    try testing.expectEqual(info.end_addr, 99278929256448);
-    try testing.expect(Permissions.read.check_perm(info.perm));
-    try testing.expect(Permissions.write.check_perm(info.perm) == false);
-    try testing.expect(Permissions.execute.check_perm(info.perm) == false);
-    try testing.expect(Permissions.shared.check_perm(info.perm) == false);
-    try testing.expectEqual(info.dev_major, 8);
-    try testing.expectEqual(info.dev_minor, 48);
-    try testing.expectEqual(info.inode, 432226);
-    try testing.expect(info.pathname != null);
-    try testing.expectEqualStrings(expected_pathname, info.pathname.?);
-}
-
-test "parse info one line with new line, heap read/write/private" {
-    const expected_pathname: []const u8 = "[heap]";
-    const value: []const u8 = "5a4b3200b000-5a4b3202c000 rw-p 00000000 00:00 0                          [heap]\n";
-    var parser: ParseInfo = .init(testing.allocator);
-    const result = try parser.parse(value, 0);
-    try testing.expect(result.info != null);
-    var info: Info = result.info.?;
-    defer info.deinit();
-    try testing.expectEqual(value.len, result.bytes_read);
-    try testing.expectEqual(ParseStep.done, result.step);
-    try testing.expectEqual(info.start_addr, 99279007952896);
-    try testing.expectEqual(info.end_addr, 99279008088064);
-    try testing.expect(Permissions.read.check_perm(info.perm));
-    try testing.expect(Permissions.write.check_perm(info.perm));
-    try testing.expect(Permissions.execute.check_perm(info.perm) == false);
-    try testing.expect(Permissions.shared.check_perm(info.perm) == false);
-    try testing.expectEqual(info.dev_major, 0);
-    try testing.expectEqual(info.dev_minor, 0);
-    try testing.expectEqual(info.inode, 0);
-    try testing.expect(info.pathname != null);
-    try testing.expectEqualStrings(expected_pathname, info.pathname.?);
-}
-
-test "parse info one line with new line, lib read/execute/shared" {
-    const expected_pathname: []const u8 = "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2";
-    const value: []const u8 = "7a837500e000-7a8375039000 r-xs 00001000 08:30 39741                      /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\n";
-    var parser: ParseInfo = .init(testing.allocator);
-    const result = try parser.parse(value, 0);
-    try testing.expect(result.info != null);
-    var info: Info = result.info.?;
-    defer info.deinit();
-    try testing.expectEqual(value.len, result.bytes_read);
-    try testing.expectEqual(ParseStep.done, result.step);
-    try testing.expectEqual(info.start_addr, 134705022296064);
-    try testing.expectEqual(info.end_addr, 134705022472192);
-    try testing.expect(Permissions.read.check_perm(info.perm));
-    try testing.expect(Permissions.write.check_perm(info.perm) == false);
-    try testing.expect(Permissions.execute.check_perm(info.perm));
-    try testing.expect(Permissions.shared.check_perm(info.perm));
-    try testing.expectEqual(info.dev_major, 8);
-    try testing.expectEqual(info.dev_minor, 48);
-    try testing.expectEqual(info.inode, 39741);
-    try testing.expect(info.pathname != null);
-    try testing.expectEqualStrings(expected_pathname, info.pathname.?);
-}
-
-test "parse info one line with new line, no pathname read/execute/shared" {
-    const value: []const u8 = "7a837500e000-7a8375039000 r-xs 00001000 00:00 0\n";
-    var parser: ParseInfo = .init(testing.allocator);
-    const result = try parser.parse(value, 0);
-    try testing.expect(result.info != null);
-    var info: Info = result.info.?;
-    defer info.deinit();
-    try testing.expectEqual(value.len, result.bytes_read);
-    try testing.expectEqual(ParseStep.done, result.step);
-    try testing.expectEqual(info.start_addr, 134705022296064);
-    try testing.expectEqual(info.end_addr, 134705022472192);
-    try testing.expect(Permissions.read.check_perm(info.perm));
-    try testing.expect(Permissions.write.check_perm(info.perm) == false);
-    try testing.expect(Permissions.execute.check_perm(info.perm));
-    try testing.expect(Permissions.shared.check_perm(info.perm));
-    try testing.expectEqual(info.dev_major, 0);
-    try testing.expectEqual(info.dev_minor, 0);
-    try testing.expectEqual(info.inode, 0);
-    try testing.expect(info.pathname != null);
-    // sets to undefined name
-    try testing.expectEqualStrings(UNDEFINED_NAME, info.pathname.?);
-}
-
-test "parse info single line with no new line" {
-    const expected_pathname: []const u8 = "/home/user/main";
-    const value: []const u8 = "5a4b2d4fd000-5a4b2d4fe000 r--p 00000000 08:30 432226                     /home/user/main";
-    var parser: ParseInfo = .init(testing.allocator);
-    const result = try parser.parse(value, 0);
-    try testing.expectEqual(ParseStep.process, result.step);
-    try testing.expect(result.info == null);
-
-    // we have to flush the last working object since there was no newline
-    const info_op = try parser.flush_last();
-    try testing.expect(info_op != null);
-    var info: Info = info_op.?;
-    defer info.deinit();
-
-    try testing.expectEqual(value.len, result.bytes_read);
-    try testing.expectEqual(info.start_addr, 99278929252352);
-    try testing.expectEqual(info.end_addr, 99278929256448);
-    try testing.expect(Permissions.read.check_perm(info.perm));
-    try testing.expect(Permissions.write.check_perm(info.perm) == false);
-    try testing.expect(Permissions.execute.check_perm(info.perm) == false);
-    try testing.expect(Permissions.shared.check_perm(info.perm) == false);
-    try testing.expectEqual(info.dev_major, 8);
-    try testing.expectEqual(info.dev_minor, 48);
-    try testing.expectEqual(info.inode, 432226);
-    try testing.expect(info.pathname != null);
-    try testing.expectEqualStrings(expected_pathname, info.pathname.?);
-}
-
-test "parse partial line" {
-    const value: []const u8 = "5a4b2d4fd000-5a4b2d4fe000";
-    var parser: ParseInfo = .init(testing.allocator);
-    const result = try parser.parse(value, 0);
-    try testing.expectEqual(ParseStep.end_addr, result.step);
-    try testing.expectEqual(value.len, result.bytes_read);
-    const empty = try parser.flush_last();
-    try testing.expect(empty == null);
-}
-
-test "Manager parse all entries" {
-    var manager: Manager = .init(testing.allocator);
-    defer manager.deinit();
-
-    const buffer: []const u8 =
-        \\5a4b2d4fd000-5a4b2d4fe000 r--p 00000000 08:30 432226                     /home/user/main
-        \\5a4b3200b000-5a4b3202c000 rw-p 00000000 00:00 0                          [heap]
-        \\7a837500e000-7a8375039000 r-xs 00001000 00:00 0
-    ;
-
-    const n = try manager.load_from_buffer(buffer, 0, true);
-
-    try testing.expectEqual(buffer.len, n);
-    try testing.expect(manager.collection.get("/home/user/main") != null);
-    try testing.expect(manager.collection.get("[heap]") != null);
-    try testing.expect(manager.collection.get(UNDEFINED_NAME) != null);
-    try testing.expect(manager.collection.get("does not exist") == null);
-    // TODO test grabbing entries
-}
+//test "parse info one line with new line, program read/private" {
+//    const expected_pathname: []const u8 = "/home/user/main";
+//    const value: []const u8 = "5a4b2d4fd000-5a4b2d4fe000 r--p 00000000 08:30 432226                     /home/user/main\n";
+//    var parser: ParseInfo = .init(testing.allocator);
+//    const result = try parser.parse(value, 0);
+//    try testing.expect(result.info != null);
+//    var info: Info = result.info.?;
+//    defer info.deinit();
+//    try testing.expectEqual(value.len, result.bytes_read);
+//    try testing.expectEqual(ParseStep.done, result.step);
+//    try testing.expectEqual(info.start_addr, 99278929252352);
+//    try testing.expectEqual(info.end_addr, 99278929256448);
+//    try testing.expect(Permissions.read.check_perm(info.perm));
+//    try testing.expect(Permissions.write.check_perm(info.perm) == false);
+//    try testing.expect(Permissions.execute.check_perm(info.perm) == false);
+//    try testing.expect(Permissions.shared.check_perm(info.perm) == false);
+//    try testing.expectEqual(info.dev_major, 8);
+//    try testing.expectEqual(info.dev_minor, 48);
+//    try testing.expectEqual(info.inode, 432226);
+//    try testing.expect(info.pathname != null);
+//    try testing.expectEqualStrings(expected_pathname, info.pathname.?);
+//}
+//
+//test "parse info one line with new line, heap read/write/private" {
+//    const expected_pathname: []const u8 = "[heap]";
+//    const value: []const u8 = "5a4b3200b000-5a4b3202c000 rw-p 00000000 00:00 0                          [heap]\n";
+//    var parser: ParseInfo = .init(testing.allocator);
+//    const result = try parser.parse(value, 0);
+//    try testing.expect(result.info != null);
+//    var info: Info = result.info.?;
+//    defer info.deinit();
+//    try testing.expectEqual(value.len, result.bytes_read);
+//    try testing.expectEqual(ParseStep.done, result.step);
+//    try testing.expectEqual(info.start_addr, 99279007952896);
+//    try testing.expectEqual(info.end_addr, 99279008088064);
+//    try testing.expect(Permissions.read.check_perm(info.perm));
+//    try testing.expect(Permissions.write.check_perm(info.perm));
+//    try testing.expect(Permissions.execute.check_perm(info.perm) == false);
+//    try testing.expect(Permissions.shared.check_perm(info.perm) == false);
+//    try testing.expectEqual(info.dev_major, 0);
+//    try testing.expectEqual(info.dev_minor, 0);
+//    try testing.expectEqual(info.inode, 0);
+//    try testing.expect(info.pathname != null);
+//    try testing.expectEqualStrings(expected_pathname, info.pathname.?);
+//}
+//
+//test "parse info one line with new line, lib read/execute/shared" {
+//    const expected_pathname: []const u8 = "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2";
+//    const value: []const u8 = "7a837500e000-7a8375039000 r-xs 00001000 08:30 39741                      /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\n";
+//    var parser: ParseInfo = .init(testing.allocator);
+//    const result = try parser.parse(value, 0);
+//    try testing.expect(result.info != null);
+//    var info: Info = result.info.?;
+//    defer info.deinit();
+//    try testing.expectEqual(value.len, result.bytes_read);
+//    try testing.expectEqual(ParseStep.done, result.step);
+//    try testing.expectEqual(info.start_addr, 134705022296064);
+//    try testing.expectEqual(info.end_addr, 134705022472192);
+//    try testing.expect(Permissions.read.check_perm(info.perm));
+//    try testing.expect(Permissions.write.check_perm(info.perm) == false);
+//    try testing.expect(Permissions.execute.check_perm(info.perm));
+//    try testing.expect(Permissions.shared.check_perm(info.perm));
+//    try testing.expectEqual(info.dev_major, 8);
+//    try testing.expectEqual(info.dev_minor, 48);
+//    try testing.expectEqual(info.inode, 39741);
+//    try testing.expect(info.pathname != null);
+//    try testing.expectEqualStrings(expected_pathname, info.pathname.?);
+//}
+//
+//test "parse info one line with new line, no pathname read/execute/shared" {
+//    const value: []const u8 = "7a837500e000-7a8375039000 r-xs 00001000 00:00 0\n";
+//    var parser: ParseInfo = .init(testing.allocator);
+//    const result = try parser.parse(value, 0);
+//    try testing.expect(result.info != null);
+//    var info: Info = result.info.?;
+//    defer info.deinit();
+//    try testing.expectEqual(value.len, result.bytes_read);
+//    try testing.expectEqual(ParseStep.done, result.step);
+//    try testing.expectEqual(info.start_addr, 134705022296064);
+//    try testing.expectEqual(info.end_addr, 134705022472192);
+//    try testing.expect(Permissions.read.check_perm(info.perm));
+//    try testing.expect(Permissions.write.check_perm(info.perm) == false);
+//    try testing.expect(Permissions.execute.check_perm(info.perm));
+//    try testing.expect(Permissions.shared.check_perm(info.perm));
+//    try testing.expectEqual(info.dev_major, 0);
+//    try testing.expectEqual(info.dev_minor, 0);
+//    try testing.expectEqual(info.inode, 0);
+//    try testing.expect(info.pathname != null);
+//    // sets to undefined name
+//    try testing.expectEqualStrings(UNDEFINED_NAME, info.pathname.?);
+//}
+//
+//test "parse info single line with no new line" {
+//    const expected_pathname: []const u8 = "/home/user/main";
+//    const value: []const u8 = "5a4b2d4fd000-5a4b2d4fe000 r--p 00000000 08:30 432226                     /home/user/main";
+//    var parser: ParseInfo = .init(testing.allocator);
+//    const result = try parser.parse(value, 0);
+//    try testing.expectEqual(ParseStep.process, result.step);
+//    try testing.expect(result.info == null);
+//
+//    // we have to flush the last working object since there was no newline
+//    const info_op = try parser.flush_last();
+//    try testing.expect(info_op != null);
+//    var info: Info = info_op.?;
+//    defer info.deinit();
+//
+//    try testing.expectEqual(value.len, result.bytes_read);
+//    try testing.expectEqual(info.start_addr, 99278929252352);
+//    try testing.expectEqual(info.end_addr, 99278929256448);
+//    try testing.expect(Permissions.read.check_perm(info.perm));
+//    try testing.expect(Permissions.write.check_perm(info.perm) == false);
+//    try testing.expect(Permissions.execute.check_perm(info.perm) == false);
+//    try testing.expect(Permissions.shared.check_perm(info.perm) == false);
+//    try testing.expectEqual(info.dev_major, 8);
+//    try testing.expectEqual(info.dev_minor, 48);
+//    try testing.expectEqual(info.inode, 432226);
+//    try testing.expect(info.pathname != null);
+//    try testing.expectEqualStrings(expected_pathname, info.pathname.?);
+//}
+//
+//test "parse partial line" {
+//    const value: []const u8 = "5a4b2d4fd000-5a4b2d4fe000";
+//    var parser: ParseInfo = .init(testing.allocator);
+//    const result = try parser.parse(value, 0);
+//    try testing.expectEqual(ParseStep.end_addr, result.step);
+//    try testing.expectEqual(value.len, result.bytes_read);
+//    const empty = try parser.flush_last();
+//    try testing.expect(empty == null);
+//}
+//
+//test "Manager parse all entries" {
+//    var manager: Manager = .init(testing.allocator);
+//    defer manager.deinit();
+//
+//    const buffer: []const u8 =
+//        \\5a4b2d4fd000-5a4b2d4fe000 r--p 00000000 08:30 432226                     /home/user/main
+//        \\5a4b3200b000-5a4b3202c000 rw-p 00000000 00:00 0                          [heap]
+//        \\7a837500e000-7a8375039000 r-xs 00001000 00:00 0
+//    ;
+//
+//    const n = try manager.load_from_buffer(buffer, 0, true);
+//
+//    try testing.expectEqual(buffer.len, n);
+//    try testing.expect(manager.collection.get("/home/user/main") != null);
+//    try testing.expect(manager.collection.get("[heap]") != null);
+//    try testing.expect(manager.collection.get(UNDEFINED_NAME) != null);
+//    try testing.expect(manager.collection.get("does not exist") == null);
+//    // TODO test grabbing entries
+//}
