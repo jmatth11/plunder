@@ -1,7 +1,7 @@
 # Plunder
 
 Contents:
-- [Example(#example)
+- [Example](#example)
 - [Testing](#testing)
 - [TUI Demo](#tui-demo)
 
