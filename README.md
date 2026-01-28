@@ -1,10 +1,27 @@
 # Plunder
 
-A simple library to read memory from a running process.
+Contents:
+- [Example(#example)
+- [Testing](#testing)
+- [TUI Demo](#tui-demo)
 
-There are plans to add more functionality to this library, but the current
-feature set allows for the core functionality to read memory from a running
-process to be achieved.
+Plunder allows you read/write memory from a running process on linux and grab basic network information.
+
+This repo is a library and a TUI.
+
+Currently the TUI only implements a subset of what the library can do.
+
+The TUI is build with `zig build -Doptimize=ReleaseSafe`. Run it with `sudo ./zig-out/bin/plunder`.
+
+Current functionality:
+- Read Memory from a given process.
+    - Get the list of region names
+    - Read the raw data from the Region.
+    - Read only populated data from the Region.
+- Write to memory to a given process.
+- Read basic network information from a given process.
+    - Read what ports and protocols a process is using.
+
 
 > [!WARNING]
 > This library is still in the early stages and the API may change.
