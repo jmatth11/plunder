@@ -29,7 +29,7 @@ function build_proj() {
   rm -rf /tmp/zig
 }
 
-which zig
+which zig > /dev/null 2>&1
 if [ $? -ne 0 ]; then
   echo "zig not found. pulling temporary zig for build."
   build_proj
