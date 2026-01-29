@@ -44,7 +44,6 @@ pub const StringView = struct {
         var start: usize = 0;
         while (ref_idx < self.ref.len) : (ref_idx += 1) {
             if (step == idx) {
-                // TODO write tests for this. not sure if this works as intended
                 const end = std.mem.indexOfScalar(u8, self.ref[start..], self.delimiter);
                 if (end == null) {
                     return Errors.delimiter_not_found;
