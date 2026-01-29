@@ -1,19 +1,23 @@
 # Plunder
 
 Contents:
+- [Build](#build)
+    - [TUI](#tui)
+    - [Library](#library)
 - [Example](#example)
 - [Testing](#testing)
 - [TUI Demo](#tui-demo)
     - [Reading Memory](#reading-memory)
     - [View Info](#view-info)
 
+> [!WARNING]
+> This library is still in the early stages and the API may change.
+
 Plunder allows you read/write memory from a running process on linux and grab basic network information.
 
 This repo is a library and a TUI.
 
 Currently the TUI only implements a subset of what the library can do.
-
-The TUI is build with `zig build -Doptimize=ReleaseSafe`. Run it with `sudo ./zig-out/bin/plunder`.
 
 Current functionality:
 - Read Memory from a given process.
@@ -24,11 +28,45 @@ Current functionality:
 - Read basic network information from a given process.
     - Read what ports and protocols a process is using.
 
+## Build
 
-> [!WARNING]
-> This library is still in the early stages and the API may change.
+### TUI
+
+The easiest way to build the TUI is like so:
+```bash
+./build.sh
+```
+
+The build script will check to see if you have the right version of zig installed
+and if so, use that to build the TUI. Otherwise, it will download a temporary Zig
+to use to compile the program then delete the temporary Zig once done.
+
+Run the TUI with:
+```bash
+sudo ./zig-out/bin/plunder
+```
+
+### Library
+
+Include the library into your project like so.
+
+Fetch the library:
+```bash
+zig fetch --save git+https://github.com/jmatth11/plunder#main
+```
+
+Add this to your `build.zig` file.
+```zig
+    const plunder_dep = b.dependency("plunder", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("plunder", plunder_dep.module("plunder");
+```
 
 ## Example
+
+Simple reading from a process ID and getting the populated memory from a certain region.
 
 ```zig
 const std = @import("std");
@@ -74,6 +112,8 @@ pub fn main() !void {
     }
 }
 ```
+
+You can also look at `test/heap_read.zig` to see an example of overwriting memory.
 
 ## Testing
 
