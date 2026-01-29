@@ -30,7 +30,7 @@ pub const Memory = struct {
         return result;
     }
     /// Initialize with a given buffer and mapped info structure.
-    pub fn init_with_buffer(alloc: std.mem.Allocator, buffer: []const u8, info: map.Info) !Memory {
+    pub fn init_with_buffer(alloc: std.mem.Allocator, buffer: []const u8, info: *const map.Info) !Memory {
         var result: Memory = .{
             .alloc = alloc,
         };
@@ -161,6 +161,15 @@ pub const Memory = struct {
         return try alloc.dupe(u8, buffer[0..writer.end]);
     }
 
+    /// Create a duplicate of the memory structure with a given allocator.
+    pub fn dupe(self: *Memory, alloc: std.mem.Allocator) !Memory {
+        if (self.buffer) |buffer| {
+            return try .init_with_buffer(alloc, buffer, &self.info);
+        } else {
+            return try .init(alloc, self.info);
+        }
+    }
+
     /// Deinitialize.
     pub fn deinit(self: *Memory) void {
         self.info.deinit();
@@ -227,7 +236,7 @@ pub const Region = struct {
                         var new_mem: Memory = try .init_with_buffer(
                             alloc,
                             buf[start_idx..cur_idx],
-                            memory.info,
+                            &memory.info,
                         );
                         new_mem.starting_offset = start_idx;
                         try result.append(new_mem);
