@@ -94,4 +94,4 @@ https://github.com/user-attachments/assets/b5638b15-ee20-439e-beef-37de7d8a390b
 
 ### View Info
 
-https://github.com/user-attachments/assets/ca1bcb6c-88b2-4efd-b3a5-055de573710e
+https://github.com/user-attachments/assets/68256d09-6742-4adc-865b-9685bd48b510
