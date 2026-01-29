@@ -4,6 +4,8 @@ Contents:
 - [Example](#example)
 - [Testing](#testing)
 - [TUI Demo](#tui-demo)
+    - [Reading Memory](#reading-memory)
+    - [View Info](#view-info)
 
 Plunder allows you read/write memory from a running process on linux and grab basic network information.
 
@@ -86,4 +88,10 @@ You can run this test with the `run_test.sh` script at the top of the repo.
 
 ## TUI Demo
 
+### Reading Memory
+
 https://github.com/user-attachments/assets/b5638b15-ee20-439e-beef-37de7d8a390b
+
+### View Info
+
+https://github.com/user-attachments/assets/ca1bcb6c-88b2-4efd-b3a5-055de573710e
