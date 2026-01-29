@@ -2,6 +2,7 @@ const std = @import("std");
 const plunder = @import("plunder");
 const tui = @import("zigtui");
 const errorView = @import("ErrorView.zig");
+const utils = @import("CommonUtils.zig");
 
 /// Errors related to Memory view and subviews.
 pub const Errors = error{
@@ -64,12 +65,11 @@ pub const RegionMemoryView = struct {
             // minus 4 to account for the different level of offsets.
             // should have a better way of handling this
             const offset_height = height - 4;
-            const scroll_offset_height = self.scroll_offset + offset_height;
-            if (self.selected > scroll_offset_height) {
-                self.scroll_offset = self.selected - offset_height;
-            } else if (self.selected < self.scroll_offset) {
-                self.scroll_offset = self.selected;
-            }
+            self.scroll_offset = utils.calculate_scroll_offset(
+                self.scroll_offset,
+                self.selected,
+                offset_height,
+            );
             var offset_area = area;
             offset_area.y += 1;
             var idx: usize = self.scroll_offset;
@@ -151,9 +151,7 @@ pub const RegionView = struct {
     /// Select action.
     pub fn select(self: *RegionView) void {
         if (self.region) |region| {
-            if (self.region_memory_view.is_loaded()) {
-
-            } else {
+            if (self.region_memory_view.is_loaded()) {} else {
                 self.region_memory_view.load(region.memory.items[self.selected]);
             }
         }
@@ -241,12 +239,11 @@ pub const RegionView = struct {
             // should be a better way to get this
             const offset_height = height - 4;
             // handle scroll offset
-            const scroll_offset_height = self.scroll_offset + offset_height;
-            if (self.selected > scroll_offset_height) {
-                self.scroll_offset = self.selected - offset_height;
-            } else if (self.selected < self.scroll_offset) {
-                self.scroll_offset = self.selected;
-            }
+            self.scroll_offset = utils.calculate_scroll_offset(
+                self.scroll_offset,
+                self.selected,
+                offset_height,
+            );
             var offset_area = area;
             offset_area.y += 1;
             if (selected_region.memory.items.len > 1) {
@@ -319,6 +316,8 @@ pub const MemoryTable = struct {
     theme: tui.Theme = tui.themes.dracula,
     /// currently selected line.
     selected: usize = 0,
+    /// Scroll offset
+    scroll_offset: usize = 0,
     /// The region subview.
     region_view: RegionView = .{},
     /// List of region names
@@ -373,8 +372,7 @@ pub const MemoryTable = struct {
             if (region_name.len > 0) {
                 const selected_region = plun.get_region_data(region_name) catch |err| {
                     // certain memory regions like "vsyscall" are legacy emulation regions
-                    // and we are not allowed to
-                    // TODO finish
+                    // and we are not allowed to read from them
                     if (err == error.InputOutput) {
                         const errView = try errorView.get_error_view();
                         try errView.add("Error Input/Output:\nMemory region is not readable.\n");
@@ -391,32 +389,42 @@ pub const MemoryTable = struct {
         }
     }
 
+    /// Render method for memory table
     pub fn render(self: *MemoryTable, arena: std.mem.Allocator, area: tui.Rect, buf: *tui.render.Buffer) !void {
+        // check if region view is loaded
         if (self.region_view.is_loaded()) {
             try self.region_view.render(arena, area, buf);
             return;
         }
+        // if region view is not loaded we need to display the region names list
         if (self.region_names) |list| {
             const cols: []const tui.widgets.Column = &.{
                 tui.widgets.Column{
                     .header = "Region Name",
                 },
             };
+            // generate rows
             const rows = try self.gen_rows(arena, list);
 
+            // TODO jmatth11 replace with scroll_offset
             const offset_height = area.height - 2;
-            const offset = if (self.selected >= offset_height) self.selected - offset_height else 0;
+            self.scroll_offset = utils.calculate_scroll_offset(
+                self.scroll_offset,
+                self.selected,
+                offset_height,
+            );
             const table: tui.widgets.Table = .{
                 .header_style = self.theme.tableHeaderStyle(),
                 .selected_style = self.theme.selectionStyle(),
                 .rows = rows,
                 .columns = cols,
                 .selected = self.selected,
-                .offset = offset,
+                .offset = self.scroll_offset,
             };
 
             table.render(area, buf);
         } else {
+            // error message
             const msg: tui.widgets.Paragraph = .{
                 .text = "Process does not have a memory mapping file.",
                 .style = self.theme.warningStyle(),
@@ -425,6 +433,7 @@ pub const MemoryTable = struct {
         }
     }
 
+    /// Cleanup
     pub fn deinit(self: *MemoryTable) void {
         self.region_view.deinit();
         if (self.region_names) |*list| {
@@ -432,6 +441,7 @@ pub const MemoryTable = struct {
         }
     }
 
+    /// Get the selected Region's name.
     fn get_selected_name(self: *MemoryTable) []const u8 {
         if (self.region_names) |list| {
             return list.items[self.selected];
@@ -439,6 +449,7 @@ pub const MemoryTable = struct {
         return "";
     }
 
+    /// Generate rows for the table
     fn gen_rows(self: *MemoryTable, arena: std.mem.Allocator, list: plunder.common.StringList) ![]const tui.widgets.Row {
         var result: []tui.widgets.Row = try arena.alloc(
             tui.widgets.Row,
@@ -457,15 +468,24 @@ pub const MemoryTable = struct {
     }
 };
 
+/// Memory view
 pub const MemoryView = struct {
+    /// main allocator
     alloc: std.mem.Allocator,
+    /// arena allocator
     arena: std.heap.ArenaAllocator,
+    /// Plunder structure.
     plun: plunder.Plunder,
+    /// Memory table subview
     table: MemoryTable = .{},
+    /// main theme
     theme: tui.Theme = tui.themes.dracula,
+    /// focus flag (controlled by parent)
     focused: bool = false,
+    /// The currently loaded process.
     proc: ?plunder.proc.ProcInfo = null,
 
+    /// Initialize
     pub fn init(alloc: std.mem.Allocator) MemoryView {
         return .{
             .alloc = alloc,
@@ -474,6 +494,7 @@ pub const MemoryView = struct {
         };
     }
 
+    /// Set the process to view the memory for.
     pub fn set_proc(self: *MemoryView, proc: plunder.proc.ProcInfo) !void {
         if (self.proc != null) {
             self.plun.deinit();
@@ -492,22 +513,30 @@ pub const MemoryView = struct {
         }
     }
 
+    /// Next Selection action
     pub fn next_selection(self: *MemoryView) void {
         self.table.next_selection();
     }
+    /// Previous Selection action
     pub fn prev_selection(self: *MemoryView) void {
         self.table.prev_selection();
     }
+    /// Deselect action
     pub fn deselect(self: *MemoryView) void {
         self.table.deselect();
     }
+    /// Select action
     pub fn select(self: *MemoryView) !void {
         try self.table.select(&self.plun);
     }
 
+    /// Memory view render method
     pub fn render(self: *MemoryView, area: tui.Rect, buf: *tui.render.Buffer) !void {
         const arena = self.arena.allocator();
+        // reset arena but retain capacity because we probably are rendering
+        // the same amount of things each time
         _ = self.arena.reset(.retain_capacity);
+        // conditional title
         const title = if (self.table.region_view.is_loaded()) "Memory View - 'b' for back" else "Memory View";
         const block: tui.widgets.Block = .{
             .style = self.theme.baseStyle(),
@@ -521,8 +550,10 @@ pub const MemoryView = struct {
 
         const inner_block = block.inner(area);
         if (self.proc != null) {
+            // render table subview
             try self.table.render(arena, inner_block, buf);
         } else {
+            // if process isn't loaded, render instruction message.
             const msg: tui.widgets.Paragraph = .{
                 .text = "Press <ENTER> on a process to view it's memory table.",
                 .style = self.theme.infoStyle(),
@@ -531,6 +562,7 @@ pub const MemoryView = struct {
         }
     }
 
+    /// cleanup
     pub fn deinit(self: *MemoryView) void {
         self.table.deinit();
         self.plun.deinit();

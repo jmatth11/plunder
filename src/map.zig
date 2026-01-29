@@ -130,30 +130,12 @@ pub const Info = struct {
     }
 };
 
+/// Array list of info structures.
 const InfoList = std.array_list.Managed(Info);
+/// A string hash map of InfoLists
 const InfoHash = std.hash_map.StringHashMap(InfoList);
 
-const ParseStep = enum(u8) {
-    nothing = 0,
-    start_addr = 1,
-    end_addr = 2,
-    perm_read = 3,
-    perm_write = 4,
-    perm_execute = 5,
-    perm_shared = 6,
-    offset = 7,
-    dev_major = 8,
-    dev_minor = 9,
-    inode = 10,
-    process = 11,
-    done = 12,
-};
-const ParseResult = struct {
-    step: ParseStep = .nothing,
-    info: ?Info = null,
-    bytes_read: usize = 0,
-};
-
+/// Parse a line from the memory mapping file of a process.
 fn parse_map_line(alloc: std.mem.Allocator, line: []const u8) !Info {
     var result: Info = .init(alloc);
     var parser: std.fmt.Parser = .{ .bytes = line, .i = 0 };

@@ -1,5 +1,6 @@
 const std = @import("std");
 
+/// Build the test program
 fn build_test(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
@@ -21,6 +22,7 @@ fn build_test(
     b.installArtifact(exe);
 }
 
+/// build the C program (goes along with the test)
 fn build_c_exe(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
@@ -61,6 +63,21 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // create executable
+    const example_exe = b.addExecutable(.{
+        .name = "example",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/example.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "plunder", .module = mod },
+            },
+        }),
+    });
+
+    b.installArtifact(example_exe);
+
     // TUI app
     const zigtui_dep = b.dependency("zigtui", .{
         .target = target,
@@ -80,23 +97,8 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(tui);
 
-    // create executable
-    const exe = b.addExecutable(.{
-        .name = "example",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/example.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "plunder", .module = mod },
-            },
-        }),
-    });
-
-    b.installArtifact(exe);
-
     const run_step = b.step("run", "Run the app");
-    const run_cmd = b.addRunArtifact(exe);
+    const run_cmd = b.addRunArtifact(tui);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {

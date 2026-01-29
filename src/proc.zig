@@ -1,17 +1,29 @@
 const std = @import("std");
 const common = @import("common.zig");
 
+/// Errors related to ProcInfo
 pub const Errors = error{
     pid_not_set,
 };
 
+/// Process info structure.
+/// Manages grabbing info about a process.
+/// - command
+/// - command line arguments
+/// - environment variables
 pub const ProcInfo = struct {
+    /// main allocator
     alloc: std.mem.Allocator,
+    /// the process ID
     pid: ?usize,
+    /// The command of the process
     command: []const u8,
+    /// The command line arguments of the process.
     command_line: common.StringView,
+    /// The environment variables of the process.
     environment_vars: common.StringView,
 
+    /// initialize
     pub fn init(alloc: std.mem.Allocator, pid: usize) !ProcInfo {
         var result: ProcInfo = .{
             .alloc = alloc,
@@ -20,12 +32,14 @@ pub const ProcInfo = struct {
             .command_line = undefined,
             .environment_vars = undefined,
         };
+        // read in data
         try result.get_comm();
         try result.get_command_line();
         try result.get_environment_vars();
         return result;
     }
 
+    /// Cleanup
     pub fn deinit(self: *ProcInfo) void {
         if (self.pid != null) {
             self.alloc.free(self.command);
@@ -35,6 +49,7 @@ pub const ProcInfo = struct {
         }
     }
 
+    /// get the command file data
     fn get_comm(self: *ProcInfo) !void {
         if (self.pid) |pid| {
             const file_path = try std.fmt.allocPrint(
@@ -50,6 +65,7 @@ pub const ProcInfo = struct {
         }
     }
 
+    /// get the command line file data
     fn get_command_line(self: *ProcInfo) !void {
         if (self.pid) |pid| {
             const file_path = try std.fmt.allocPrint(
@@ -64,6 +80,8 @@ pub const ProcInfo = struct {
             return Errors.pid_not_set;
         }
     }
+
+    /// get the environment variable file data
     fn get_environment_vars(self: *ProcInfo) !void {
         if (self.pid) |pid| {
             const file_path = try std.fmt.allocPrint(
@@ -95,12 +113,17 @@ fn get_single_line_file(alloc: std.mem.Allocator, filename: []const u8, delimite
     return line;
 }
 
+/// Arraylist of ProcInfos
 pub const ProcInfoList = std.array_list.Managed(ProcInfo);
 
+/// Structure to manage ProcInfoList entries.
 pub const ProcList = struct {
+    /// arena allocator
     alloc: std.heap.ArenaAllocator,
+    /// Process info list
     procs: ProcInfoList,
 
+    /// initialize
     pub fn init(alloc: std.mem.Allocator) ProcList {
         return .{
             .alloc = .init(alloc),
@@ -108,6 +131,7 @@ pub const ProcList = struct {
         };
     }
 
+    /// Add a new process by the given process ID.
     pub fn add(self: *ProcList, pid: []const u8) !void {
         std.log.debug("ProcList.add({s})", .{pid});
         var proc: ProcInfo = try .init(
@@ -118,12 +142,14 @@ pub const ProcList = struct {
         try self.procs.append(proc);
     }
 
+    /// Cleanup
     pub fn deinit(self: *ProcList) void {
         self.alloc.deinit();
         self.procs.deinit();
     }
 };
 
+/// Get all processes currently running.
 pub fn get_processes(alloc: std.mem.Allocator) !ProcList {
     const dir = try std.fs.openDirAbsolute("/proc", .{
         .iterate = true,
@@ -136,6 +162,7 @@ pub fn get_processes(alloc: std.mem.Allocator) !ProcList {
     while (try it.next()) |entry| {
         if (all_digits(entry.name)) {
             result.add(entry.name) catch |err| {
+                // some process may have expired before we add them, skip them.
                 if (err == error.ProcessNotFound) {
                     continue;
                 }
@@ -146,6 +173,7 @@ pub fn get_processes(alloc: std.mem.Allocator) !ProcList {
     return result;
 }
 
+/// check if the string is all digits.
 fn all_digits(key: []const u8) bool {
     for (key) |char| {
         if (!std.ascii.isDigit(char)) {

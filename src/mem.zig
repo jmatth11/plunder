@@ -5,6 +5,7 @@ const common = @import("common.zig");
 /// Process memory file path.
 const MEM_FILE: []const u8 = "/proc/{}/mem";
 
+/// Errors related to Memory
 pub const Errors = error{
     memory_buffer_not_set,
     out_of_bounds,
@@ -118,11 +119,16 @@ pub const Memory = struct {
         try writer.*.flush();
     }
 
+    /// Generate a hex dump line from the given offset into the memory.
+    /// The offset is represented as 16 bytes at a time.
     pub fn hex_dump_line(self: *const Memory, alloc: std.mem.Allocator, line_offset: usize) !?[]const u8 {
         if (self.buffer == null) {
             return Errors.memory_buffer_not_set;
         }
         const offset: usize = line_offset * 16;
+        if (offset >= self.buffer.?.len) {
+            return Errors.out_of_bounds;
+        }
         const base_addr: usize = self.info.start_addr + self.starting_offset;
         var buffer: [1024]u8 = @splat(0);
         var writer: std.io.Writer = .fixed(&buffer);
