@@ -56,7 +56,7 @@ pub const Info = struct {
     /// The device minor version.
     dev_minor: u16 = 0,
     /// The associated inode
-    inode: u32 = 0,
+    inode: usize = 0,
 
     /// Initialize an Info structure with a given allocator
     pub fn init(alloc: std.mem.Allocator) Info {
@@ -209,7 +209,7 @@ fn parse_map_line(alloc: std.mem.Allocator, line: []const u8) !Info {
     parser.i += 1;
 
     const inode = parser.until(' ');
-    result.inode = try std.fmt.parseInt(u32, inode, 10);
+    result.inode = try std.fmt.parseInt(usize, inode, 10);
     parser.i += 1;
     var next_char = parser.peek(1);
     // some lines end at this point so we check.

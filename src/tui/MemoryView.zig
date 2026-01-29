@@ -537,7 +537,7 @@ pub const MemoryView = struct {
         // the same amount of things each time
         _ = self.arena.reset(.retain_capacity);
         // conditional title
-        const title = if (self.table.region_view.is_loaded()) "Memory View - 'b' for back" else "Memory View";
+        const title = if (self.table.region_view.is_loaded()) "Memory View - [i] toggle Info view; [b] back" else "Memory View - [i] toggle Info view";
         const block: tui.widgets.Block = .{
             .style = self.theme.baseStyle(),
             .borders = tui.widgets.Borders.all(),

@@ -3,6 +3,7 @@ const tui = @import("zigtui");
 const procView = @import("tui/ProcView.zig");
 const memoryView = @import("tui/MemoryView.zig");
 const errorView = @import("tui/ErrorView.zig");
+const infoView = @import("tui/InfoView.zig");
 const theme = tui.themes.dracula;
 
 /// Specific error message for top level "show-stopper" errors.
@@ -24,12 +25,16 @@ const View = struct {
     /// error message currently being displayed
     error_msg: ?[]const u8 = null,
 
+    show_info: bool = false,
+
     // other views
 
     /// Proccess Column view -- List of all processes on machine.
     procColumn: procView.ProcView,
     /// Memory view -- Handles showing memory regions and memory for a process.
     memView: memoryView.MemoryView,
+    /// Info view -- Handles showing the process basic information.
+    info_view: infoView.InfoView,
 
     pub fn deinit(self: *View) void {
         if (self.error_msg) |err_msg| {
@@ -38,6 +43,7 @@ const View = struct {
         }
         self.procColumn.deinit();
         self.memView.deinit();
+        self.info_view.deinit();
     }
 
     /// Deselect action
@@ -45,7 +51,9 @@ const View = struct {
         switch (self.focus) {
             0 => {},
             1 => {
-                self.memView.deselect();
+                if (!self.show_info) {
+                    self.memView.deselect();
+                }
             },
             else => {},
         }
@@ -55,11 +63,15 @@ const View = struct {
     pub fn select(self: *View) !void {
         switch (self.focus) {
             0 => {
-                try self.memView.set_proc(try self.procColumn.get_selected());
+                const proc = try self.procColumn.get_selected();
+                try self.memView.set_proc(proc);
+                try self.info_view.load(proc);
                 self.change_focus();
             },
             1 => {
-                try self.memView.select();
+                if (!self.show_info) {
+                    try self.memView.select();
+                }
             },
             else => {},
         }
@@ -72,10 +84,12 @@ const View = struct {
         switch (self.focus) {
             0 => {
                 self.procColumn.focused = true;
+                self.info_view.focused = false;
                 self.memView.focused = false;
             },
             1 => {
                 self.procColumn.focused = false;
+                self.info_view.focused = true;
                 self.memView.focused = true;
             },
             else => {},
@@ -89,7 +103,11 @@ const View = struct {
                 self.procColumn.next_selection();
             },
             1 => {
-                self.memView.next_selection();
+                if (self.show_info) {
+                    self.info_view.next_selection();
+                } else {
+                    self.memView.next_selection();
+                }
             },
             else => {},
         }
@@ -101,7 +119,11 @@ const View = struct {
                 self.procColumn.prev_selection();
             },
             1 => {
-                self.memView.prev_selection();
+                if (self.show_info) {
+                    self.info_view.prev_selection();
+                } else {
+                    self.memView.prev_selection();
+                }
             },
             else => {},
         }
@@ -129,6 +151,7 @@ pub fn main() !void {
     var cur_view: View = .{
         .procColumn = .init(allocator),
         .memView = .init(allocator),
+        .info_view = .init(allocator),
         .error_view = try errorView.get_error_view(),
     };
     defer cur_view.deinit();
@@ -147,6 +170,9 @@ pub fn main() !void {
                         if (c == 'j') cur_view.next_selection();
                         if (c == 'k') cur_view.prev_selection();
                         if (c == 'b') cur_view.deselect();
+                        if (c == 'i') {
+                            cur_view.show_info = !cur_view.show_info;
+                        }
                     },
                     .tab => {
                         cur_view.change_focus();
@@ -181,7 +207,7 @@ pub fn main() !void {
                 };
                 // setup main block
                 const block: tui.widgets.Block = .{
-                    .title = "Plunder — 'q' for quit; j/k for down/up; tab to switch windows",
+                    .title = "Plunder — [q] quit; [j/k] down/up; [tab] switch focus",
                     .style = theme.baseStyle(),
                     .borders = tui.widgets.Borders.all(),
                     .border_style = theme.borderFocusedStyle(),
@@ -215,7 +241,11 @@ pub fn main() !void {
                 var view_area = inner;
                 view_area.x += table_area.width;
                 view_area.width = view_area.width -| table_area.width;
-                try view.memView.render(view_area, buf);
+                if (view.show_info) {
+                    try view.info_view.render(view_area, buf);
+                } else {
+                    try view.memView.render(view_area, buf);
+                }
 
                 // render error messages
                 const now = std.time.milliTimestamp();

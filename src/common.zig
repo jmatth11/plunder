@@ -31,7 +31,7 @@ pub const StringView = struct {
     }
 
     /// View the portion of the string at the given index.
-    pub fn at(self: *StringView, idx: usize) ![]const u8 {
+    pub fn at(self: *const StringView, idx: usize) ![]const u8 {
         if (idx > self.len) {
             return Errors.out_of_bounds;
         }
@@ -49,7 +49,7 @@ pub const StringView = struct {
                 if (end == null) {
                     return Errors.delimiter_not_found;
                 }
-                return self.ref[start..end.?];
+                return self.ref[start..(start + end.?)];
             }
             if (self.ref[ref_idx] == self.delimiter) {
                 step += 1;
