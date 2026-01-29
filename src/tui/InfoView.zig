@@ -159,8 +159,10 @@ pub const InfoView = struct {
             try self.info_str.append(" ");
             try self.info_str.append("------------------------------------");
             var buffer: [1024]u8 = undefined;
+            var show_end_line: bool = false;
             if (self.tcp_list) |tcp_list| {
                 if (tcp_list.len > 0) {
+                    show_end_line = true;
                     try self.info_str.append(" ");
                     try self.info_str.append("TCP Connections");
                     try self.info_str.append("Type | State | Local Addr | Remote Addr | inode | Kernel Slot");
@@ -174,6 +176,7 @@ pub const InfoView = struct {
             }
             if (self.udp_list) |udp_list| {
                 if (udp_list.len > 0) {
+                    show_end_line = true;
                     try self.info_str.append(" ");
                     try self.info_str.append("UDP Connections");
                     try self.info_str.append("Type | State | Local Addr | Remote Addr | inode | Kernel Slot");
@@ -183,8 +186,10 @@ pub const InfoView = struct {
                         const line = try arena.dupe(u8, writer.buffer[0..writer.end]);
                         try self.info_str.append(line);
                     }
-                    try self.info_str.append("------------------------------------");
                 }
+            }
+            if (show_end_line) {
+                try self.info_str.append("------------------------------------");
             }
         }
     }
