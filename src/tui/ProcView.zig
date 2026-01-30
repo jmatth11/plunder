@@ -145,53 +145,53 @@ pub const ProcView = struct {
             _ = self.arena.reset(.free_all);
             self.alloc.free(rows);
             self.rows = null;
+            self.selected = 0;
+            self.scroll_offset = 0;
         }
     }
 
     /// Generate rows for the table
     fn gen_rows(self: *ProcView) !void {
         if (self.rows == null) {
-            // TODO not sure if I like this
-            // Generate process list lazily
-            if (self.procs == null) {
-                self.procs = try plunder.proc.get_processes(self.alloc);
-            }
-
-            if (self.procs) |procs_list| {
-                var count: usize = 0;
-                var row_list: std.array_list.Managed(tui.widgets.Row) = .init(self.alloc);
-                defer row_list.deinit();
-                for (procs_list.procs.items) |proc| {
-                    // use arena allocator so we can bulk cleanup every frame
-                    const pid_str: []const u8 = try std.fmt.allocPrint(
-                        self.arena.allocator(),
-                        "{}",
-                        .{proc.pid.?},
-                    );
-                    const command: []const u8 = try self.arena.allocator().dupe(
-                        u8,
-                        proc.command,
-                    );
-                    var should_add: bool = true;
-                    if (self.filter) |filter| {
-                        const pid_check = std.mem.containsAtLeast(u8, pid_str, 1, filter);
-                        const command_check = std.mem.containsAtLeast(u8, command, 1, filter);
-                        should_add = pid_check or command_check;
-                    }
-                    if (should_add) {
-                        const cells = try self.arena.allocator().alloc([]const u8, 2);
-                        cells[0] = pid_str;
-                        cells[1] = command;
-                        const row: tui.widgets.Row = .{
-                            .style = self.theme.tableRowStyle(count, false),
-                            .cells = cells,
-                        };
-                        try row_list.append(row);
-                        count += 1;
-                    }
+            var procs_list = try plunder.proc.get_processes(self.alloc);
+            errdefer procs_list.deinit();
+            var result_procs: plunder.proc.ProcList = .init(self.alloc);
+            errdefer result_procs.deinit();
+            var count: usize = 0;
+            var row_list: std.array_list.Managed(tui.widgets.Row) = .init(self.alloc);
+            defer row_list.deinit();
+            for (procs_list.procs.items) |proc| {
+                // use arena allocator so we can bulk cleanup every frame
+                const pid_str: []const u8 = try std.fmt.allocPrint(
+                    self.arena.allocator(),
+                    "{}",
+                    .{proc.pid.?},
+                );
+                const command: []const u8 = try self.arena.allocator().dupe(
+                    u8,
+                    proc.command,
+                );
+                var should_add: bool = true;
+                if (self.filter) |filter| {
+                    const pid_check = std.mem.containsAtLeast(u8, pid_str, 1, filter);
+                    const command_check = std.mem.containsAtLeast(u8, command, 1, filter);
+                    should_add = pid_check or command_check;
                 }
-                self.rows = try row_list.toOwnedSlice();
+                if (should_add) {
+                    const cells = try self.arena.allocator().alloc([]const u8, 2);
+                    cells[0] = pid_str;
+                    cells[1] = command;
+                    const row: tui.widgets.Row = .{
+                        .style = self.theme.tableRowStyle(count, false),
+                        .cells = cells,
+                    };
+                    try row_list.append(row);
+                    try result_procs.append(proc);
+                    count += 1;
+                }
             }
+            self.rows = try row_list.toOwnedSlice();
+            self.procs = result_procs;
         }
     }
 };

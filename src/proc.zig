@@ -139,6 +139,11 @@ pub const ProcList = struct {
         try self.procs.append(proc);
     }
 
+    /// Append a process info structure directly.
+    pub fn append(self: *ProcList, proc: ProcInfo) !void {
+        try self.procs.append(proc);
+    }
+
     /// Cleanup
     pub fn deinit(self: *ProcList) void {
         self.alloc.deinit();
