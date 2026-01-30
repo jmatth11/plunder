@@ -11,17 +11,28 @@ pub const Errors = error{
 
 /// Info View structure
 pub const InfoView = struct {
+    /// Main allocator
     alloc: std.mem.Allocator,
+    /// Arena allocator
     arena: std.heap.ArenaAllocator,
+    /// Info string list
     info_str: plunder.common.StringList,
+    /// The currently loaded process.
     proc: ?plunder.proc.ProcInfo = null,
+    /// The line selected.
     selected: usize = 0,
+    /// The scroll offset.
     scroll_offset: usize = 0,
+    /// The TCP network info list.
     tcp_list: ?[]plunder.network.NetworkInfo = null,
+    /// The UDP network info list.
     udp_list: ?[]plunder.network.NetworkInfo = null,
+    /// Flag for the view being focused (controlled by parent)
     focused: bool = false,
+    /// main theme
     theme: tui.Theme = tui.themes.dracula,
 
+    /// initialize
     pub fn init(alloc: std.mem.Allocator) InfoView {
         return .{
             .alloc = alloc,
@@ -30,13 +41,15 @@ pub const InfoView = struct {
         };
     }
 
+    /// cleanup
     pub fn deinit(self: *InfoView) void {
         self.unload();
         self.arena.deinit();
     }
 
+    /// Render info view
     pub fn render(self: *InfoView, area: tui.Rect, buf: *tui.render.Buffer) !void {
-        const title = "Info View - [i] toggle back to Memory view";
+        const title = " Info View - [i] toggle back to Memory view ";
         const block: tui.widgets.Block = .{
             .style = self.theme.baseStyle(),
             .borders = tui.widgets.Borders.all(),
@@ -76,6 +89,7 @@ pub const InfoView = struct {
                 inner_block.y += 1;
             }
         } else {
+            // instruction message to display if a process isn't loaded.
             const msg: tui.widgets.Paragraph = .{
                 .text = "Press <ENTER> on a process to view it's info.",
                 .style = self.theme.infoStyle(),
@@ -84,6 +98,7 @@ pub const InfoView = struct {
         }
     }
 
+    /// Load info for a new process.
     pub fn load(self: *InfoView, proc: plunder.proc.ProcInfo) !void {
         if (proc.pid == null) {
             return Errors.missing_process_id;
@@ -97,6 +112,7 @@ pub const InfoView = struct {
         try self.generate_info_str(self.arena.allocator());
     }
 
+    /// Unload the current process.
     pub fn unload(self: *InfoView) void {
         self.proc = null;
         if (self.tcp_list) |tcp_list| {
@@ -111,12 +127,14 @@ pub const InfoView = struct {
         _ = self.arena.reset(.free_all);
     }
 
+    /// Next selection action.
     pub fn next_selection(self: *InfoView) void {
         if (self.proc != null) {
             self.selected += 1;
             self.selected = self.selected % self.info_str.items.len;
         }
     }
+    /// Previous selection action.
     pub fn prev_selection(self: *InfoView) void {
         if (self.proc != null) {
             if (self.selected == 0) {
@@ -127,6 +145,7 @@ pub const InfoView = struct {
         }
     }
 
+    /// Generate the info string list to display.
     fn generate_info_str(self: *InfoView, arena: std.mem.Allocator) !void {
         if (self.proc) |proc| {
             const command = try std.fmt.allocPrint(arena, "Command: {s}", .{proc.command});

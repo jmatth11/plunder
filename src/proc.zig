@@ -59,7 +59,6 @@ pub const ProcInfo = struct {
             );
             defer self.alloc.free(file_path);
             self.command = try get_single_line_file(self.alloc, file_path, '\n');
-            std.log.debug("command={s}", .{self.command});
         } else {
             return Errors.pid_not_set;
         }
@@ -100,7 +99,6 @@ pub const ProcInfo = struct {
 
 /// This function assumes the file being opened is a single line file (i.e. comm, cmdline, environ)
 fn get_single_line_file(alloc: std.mem.Allocator, filename: []const u8, delimiter: u8) ![]const u8 {
-    std.log.debug("filename = {s}", .{filename});
     var fs = try std.fs.openFileAbsolute(filename, .{});
     defer fs.close();
     var read_buf: [1024]u8 = undefined;
@@ -133,7 +131,6 @@ pub const ProcList = struct {
 
     /// Add a new process by the given process ID.
     pub fn add(self: *ProcList, pid: []const u8) !void {
-        std.log.debug("ProcList.add({s})", .{pid});
         var proc: ProcInfo = try .init(
             self.alloc.allocator(),
             try std.fmt.parseInt(usize, pid, 10),

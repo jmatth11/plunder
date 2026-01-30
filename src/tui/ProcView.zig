@@ -27,6 +27,8 @@ pub const ProcView = struct {
     scroll_offset: usize = 0,
     /// flag for focus (controlled by parent)
     focused: bool = true,
+    /// Filter string for process list.
+    filter: ?[]const u8 = null,
 
     /// initialize the process view
     pub fn init(alloc: std.mem.Allocator) ProcView {
@@ -53,7 +55,7 @@ pub const ProcView = struct {
             .borders = tui.widgets.Borders.all(),
             .border_symbols = tui.widgets.BorderSymbols.double(),
             .border_style = if (self.focused) self.theme.borderFocusedStyle() else self.theme.borderStyle(),
-            .title = "Process List",
+            .title = " Process List - [/] search ",
         };
 
         block.render(area, buf);
@@ -109,10 +111,38 @@ pub const ProcView = struct {
         }
     }
 
+    /// Set the filter to apply to the process list.
+    pub fn set_filter(self: *ProcView, new_filter: ?[]const u8) !void {
+        if (self.filter) |filter| {
+            self.alloc.free(filter);
+        }
+        self.filter = new_filter;
+        if (self.filter) |filter| {
+            self.filter = try self.alloc.dupe(u8, filter);
+        }
+        self.clear_rows();
+        self.clear_procs();
+    }
+
     /// Cleanup
     pub fn deinit(self: *ProcView) void {
         self.arena.deinit();
         if (self.rows) |rows| {
+            self.alloc.free(rows);
+            self.rows = null;
+        }
+    }
+
+    fn clear_procs(self: *ProcView) void {
+        if (self.procs) |*procs| {
+            procs.*.deinit();
+            self.procs = null;
+        }
+    }
+
+    fn clear_rows(self: *ProcView) void {
+        if (self.rows) |rows| {
+            _ = self.arena.reset(.free_all);
             self.alloc.free(rows);
             self.rows = null;
         }
@@ -128,11 +158,10 @@ pub const ProcView = struct {
             }
 
             if (self.procs) |procs_list| {
-                self.rows = try self.alloc.alloc(
-                    tui.widgets.Row,
-                    procs_list.procs.items.len,
-                );
-                for (procs_list.procs.items, 0..) |proc, idx| {
+                var count: usize = 0;
+                var row_list: std.array_list.Managed(tui.widgets.Row) = .init(self.alloc);
+                defer row_list.deinit();
+                for (procs_list.procs.items) |proc| {
                     // use arena allocator so we can bulk cleanup every frame
                     const pid_str: []const u8 = try std.fmt.allocPrint(
                         self.arena.allocator(),
@@ -143,14 +172,25 @@ pub const ProcView = struct {
                         u8,
                         proc.command,
                     );
-                    const cells = try self.arena.allocator().alloc([]const u8, 2);
-                    cells[0] = pid_str;
-                    cells[1] = command;
-                    self.rows.?[idx] = tui.widgets.Row{
-                        .style = self.theme.tableRowStyle(idx, false),
-                        .cells = cells,
-                    };
+                    var should_add: bool = true;
+                    if (self.filter) |filter| {
+                        const pid_check = std.mem.containsAtLeast(u8, pid_str, 1, filter);
+                        const command_check = std.mem.containsAtLeast(u8, command, 1, filter);
+                        should_add = pid_check or command_check;
+                    }
+                    if (should_add) {
+                        const cells = try self.arena.allocator().alloc([]const u8, 2);
+                        cells[0] = pid_str;
+                        cells[1] = command;
+                        const row: tui.widgets.Row = .{
+                            .style = self.theme.tableRowStyle(count, false),
+                            .cells = cells,
+                        };
+                        try row_list.append(row);
+                        count += 1;
+                    }
                 }
+                self.rows = try row_list.toOwnedSlice();
             }
         }
     }

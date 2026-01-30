@@ -4,6 +4,7 @@ const procView = @import("tui/ProcView.zig");
 const memoryView = @import("tui/MemoryView.zig");
 const errorView = @import("tui/ErrorView.zig");
 const infoView = @import("tui/InfoView.zig");
+const searchBar = @import("tui/SearchBar.zig");
 const theme = tui.themes.dracula;
 
 /// Specific error message for top level "show-stopper" errors.
@@ -25,7 +26,11 @@ const View = struct {
     /// error message currently being displayed
     error_msg: ?[]const u8 = null,
 
+    /// Flag to show the info view.
     show_info: bool = false,
+
+    /// Flag for search mode (allows user to filter the current view)
+    search_mode: bool = false,
 
     // other views
 
@@ -35,6 +40,8 @@ const View = struct {
     memView: memoryView.MemoryView,
     /// Info view -- Handles showing the process basic information.
     info_view: infoView.InfoView,
+    /// SearchBar view -- Handles filter lists of the focused window.
+    search_bar: searchBar.SearchBar,
 
     pub fn deinit(self: *View) void {
         if (self.error_msg) |err_msg| {
@@ -44,6 +51,30 @@ const View = struct {
         self.procColumn.deinit();
         self.memView.deinit();
         self.info_view.deinit();
+    }
+
+    /// Set search filter for focused window.
+    pub fn set_filter(self: *View) !void {
+        switch (self.focus) {
+            0 => {
+                const filter = try self.search_bar.get_result();
+                try self.procColumn.set_filter(filter);
+                self.search_mode = false;
+            },
+            1 => {},
+            else => {},
+        }
+    }
+
+    /// Clear search filter for focused window.
+    pub fn clear_filter(self: *View) !void {
+        switch (self.focus) {
+            0 => {
+                try self.procColumn.set_filter(null);
+            },
+            1 => {},
+            else => {},
+        }
     }
 
     /// Deselect action
@@ -152,6 +183,7 @@ pub fn main() !void {
         .procColumn = .init(allocator),
         .memView = .init(allocator),
         .info_view = .init(allocator),
+        .search_bar = .init(allocator),
         .error_view = try errorView.get_error_view(),
     };
     defer cur_view.deinit();
@@ -166,27 +198,57 @@ pub fn main() !void {
             .key => |key| {
                 switch (key.code) {
                     .char => |c| {
-                        if (c == 'q' or c == 'Q') running = false;
-                        if (c == 'j') cur_view.next_selection();
-                        if (c == 'k') cur_view.prev_selection();
-                        if (c == 'b') cur_view.deselect();
-                        if (c == 'i') {
-                            cur_view.show_info = !cur_view.show_info;
+                        if (!cur_view.search_mode) {
+                            if (c == 'q' or c == 'Q') running = false;
+                            if (c == 'j') cur_view.next_selection();
+                            if (c == 'k') cur_view.prev_selection();
+                            if (c == 'b') cur_view.deselect();
+                            if (c == 'i') {
+                                cur_view.show_info = !cur_view.show_info;
+                            }
+                            if (c == '/') {
+                                cur_view.search_mode = true;
+                                // reset search text
+                                cur_view.search_bar.len = 0;
+                            }
+                        } else {
+                            cur_view.search_bar.add(c);
+                        }
+                    },
+                    .backspace => {
+                        if (cur_view.search_mode) {
+                            cur_view.search_bar.delete();
                         }
                     },
                     .tab => {
-                        cur_view.change_focus();
+                        if (!cur_view.search_mode) {
+                            cur_view.change_focus();
+                        }
                     },
                     .up => {
-                        cur_view.prev_selection();
+                        if (!cur_view.search_mode) {
+                            cur_view.prev_selection();
+                        }
                     },
                     .down => {
-                        cur_view.next_selection();
+                        if (!cur_view.search_mode) {
+                            cur_view.next_selection();
+                        }
                     },
                     .enter => {
-                        try cur_view.select();
+                        if (cur_view.search_mode) {
+                            try cur_view.set_filter();
+                        } else {
+                            try cur_view.select();
+                        }
                     },
-                    .esc => running = false,
+                    .esc => {
+                        if (cur_view.search_mode) {
+                            cur_view.search_mode = false;
+                        } else {
+                            running = false;
+                        }
+                    },
                     else => {},
                 }
             },
@@ -207,7 +269,7 @@ pub fn main() !void {
                 };
                 // setup main block
                 const block: tui.widgets.Block = .{
-                    .title = "Plunder — [q] quit; [j/k] down/up; [tab] switch focus",
+                    .title = " Plunder — [q] quit; [j/k] down/up; [tab] switch focus ",
                     .style = theme.baseStyle(),
                     .borders = tui.widgets.Borders.all(),
                     .border_style = theme.borderFocusedStyle(),
@@ -280,6 +342,15 @@ pub fn main() !void {
                         .style = theme.errorStyle(),
                     };
                     err_paragraph.render(inner_error_block, buf);
+                }
+                if (view.search_mode) {
+                    const search_bar_area: tui.Rect = .{
+                        .x = inner.x,
+                        .y = inner.height - 1,
+                        .height = 3,
+                        .width = inner.width,
+                    };
+                    try view.search_bar.render(search_bar_area, buf);
                 }
             }
         }.render);
