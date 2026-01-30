@@ -1,6 +1,6 @@
 .{
     .name = .plunder,
-    .version = "0.0.4",
+    .version = "0.0.5",
     .fingerprint = 0xda6c3f5838b79c5,
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
