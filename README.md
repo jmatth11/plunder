@@ -4,11 +4,12 @@ Contents:
 - [Build](#build)
     - [TUI](#tui)
     - [Library](#library)
+- [Functionality](#functionality)
+    - [Library Features](#library-features)
+    - [TUI Features](#tui-features)
 - [Example](#example)
 - [Testing](#testing)
 - [TUI Demo](#tui-demo)
-    - [Reading Memory](#reading-memory)
-    - [View Info](#view-info)
 
 > [!WARNING]
 > This library is still in the early stages and the API may change.
@@ -17,7 +18,9 @@ Plunder allows you read/write memory from a running process on linux and grab ba
 
 This repo is a library and a TUI.
 
-Currently the TUI only implements a subset of what the library can do.
+## Functionality
+
+### Library Features
 
 Current functionality:
 - Read Memory from a given process.
@@ -27,6 +30,15 @@ Current functionality:
 - Write to memory to a given process.
 - Read basic network information from a given process.
     - Read what ports and protocols a process is using.
+
+### TUI Features
+
+Currently the TUI only implements a subset of what the library can do.
+
+Functionality list:
+- View all processes currently running on the machine.
+- View memory regions, raw memory within regions, and process info (cmd line args, env args, network info).
+- Filter process list for quickly finding process to view. Filter works on process id and process name.
 
 ## Build
 
@@ -128,10 +140,4 @@ You can run this test with the `run_test.sh` script at the top of the repo.
 
 ## TUI Demo
 
-### Reading Memory
-
-https://github.com/user-attachments/assets/b5638b15-ee20-439e-beef-37de7d8a390b
-
-### View Info
-
-https://github.com/user-attachments/assets/68256d09-6742-4adc-865b-9685bd48b510
+https://github.com/user-attachments/assets/64593441-09e5-4096-8e98-a1d72aa9972d
