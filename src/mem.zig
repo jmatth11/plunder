@@ -19,6 +19,7 @@ pub const Memory = struct {
     info: map.Info = undefined,
     /// Starting offset is set if the buffer starts later than info.start_addr.
     starting_offset: usize = 0,
+    /// Memory buffer
     buffer: ?[]const u8 = null,
 
     /// Initialize with a given mapped info structure.

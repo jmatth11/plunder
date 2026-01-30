@@ -3,11 +3,39 @@ const plunder = @import("plunder");
 const tui = @import("zigtui");
 const errorView = @import("ErrorView.zig");
 const utils = @import("CommonUtils.zig");
+const searchBar = @import("SearchBar.zig");
 
 /// Errors related to Memory view and subviews.
 pub const Errors = error{
     no_process_id,
     empty_region_name,
+};
+
+const Selection = struct {
+    start: usize = 0,
+    end: usize = 0,
+    limit: usize = 0,
+
+    pub fn forward(self: *Selection) void {
+        self.end += 1;
+        if (self.end >= self.limit) {
+            self.end = 0;
+        }
+    }
+    pub fn back(self: *Selection) void {
+        if (self.end == 0) {
+            self.end = self.limit - 1;
+        } else {
+            self.end -= 0;
+        }
+    }
+};
+
+pub const Navigation = enum {
+    up,
+    down,
+    left,
+    right,
 };
 
 /// Structure to handle rendering the Memory within a region
@@ -21,12 +49,75 @@ pub const RegionMemoryView = struct {
     /// Currently loaded memory structure.
     memory: ?plunder.mem.Memory = null,
 
+    cursor: searchBar.Cursor = .{},
+
+    selection: ?Selection = null,
+
     /// Load a new memory to render.
     pub fn load(self: *RegionMemoryView, memory: plunder.mem.Memory) void {
         // we do not deinitialize memory because we don't own it.
         self.memory = memory;
         self.selected = 0;
         self.scroll_offset = 0;
+    }
+
+    pub fn start_selection(self: *RegionMemoryView) void {
+        if (self.memory) |memory| {
+            if (memory.buffer) |buf| {
+                self.selection = .{
+                    .limit = buf.len,
+                };
+            }
+        }
+    }
+
+    fn up(self: *RegionMemoryView, buf: []const u8) void {
+        if (self.cursor.row == 0) {
+            const line_idx = buf.len / 16;
+            self.cursor.row = line_idx - 1;
+        } else {
+            self.cursor.row -= 1;
+        }
+    }
+
+    fn down(self: *RegionMemoryView, buf: []const u8) void {
+        self.cursor.row += 1;
+        self.cursor.row = self.cursor.row % (buf.len / 16);
+    }
+
+    pub fn nav(self: *RegionMemoryView, dir: Navigation) void {
+        if (self.memory) |memory| {
+            if (memory.buffer) |buf| {
+                switch (dir) {
+                    .up => {
+                        self.up(buf);
+                    },
+                    .down => {
+                        self.down(buf);
+                    },
+                    .left => {
+                        if (self.cursor.col == 0) {
+                            self.cursor.col = 15;
+                            self.up(buf);
+                        } else {
+                            self.cursor.col -= 1;
+                        }
+                    },
+                    .right => {
+                        if (self.cursor.col == 15) {
+                            self.cursor.col = 0;
+                            self.down(buf);
+                        } else {
+                            self.cursor.col += 1;
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    pub fn clear_selection(self: *RegionMemoryView) void {
+        self.selection = null;
     }
 
     /// Unload the current memory.
@@ -58,41 +149,139 @@ pub const RegionMemoryView = struct {
         }
     }
 
+    fn is_selected(self: *RegionMemoryView, idx: usize) bool {
+        if (self.selection == null) {
+            const cursor_idx = (self.cursor.row * 16) + self.cursor.col;
+            return idx == cursor_idx;
+        }
+    }
+
     /// Render functions for memory
     pub fn render(self: *RegionMemoryView, arena: std.mem.Allocator, area: tui.Rect, buf: *tui.render.Buffer) !void {
         if (self.memory) |memory| {
+            var buffer: []const u8 = undefined;
+            if (memory.buffer == null) return;
+            buffer = memory.buffer.?;
             const height = area.y + area.height;
             // minus 4 to account for the different level of offsets.
             // should have a better way of handling this
             const offset_height = height - 4;
             self.scroll_offset = utils.calculate_scroll_offset(
                 self.scroll_offset,
-                self.selected,
+                self.cursor.row,
                 offset_height,
             );
             var offset_area = area;
             offset_area.y += 1;
-            var idx: usize = self.scroll_offset;
+            // TODO figure this out -- need to increment idx and offset_area
+            var idx: usize = self.scroll_offset * 16;
             while (offset_area.y < height) : (offset_area.y += 1) {
-                const line_op = try memory.hex_dump_line(arena, idx);
-                if (line_op) |line| {
-                    if (self.selected == idx) {
-                        buf.setString(
-                            offset_area.x,
-                            offset_area.y,
-                            line,
-                            self.theme.highlightStyle(),
+                var working_offset = offset_area;
+                const base_addr: usize = memory.info.start_addr + memory.starting_offset + idx;
+                const base_addr_str = try std.fmt.allocPrint(arena, "{X:0>12} ", .{base_addr});
+                buf.setString(
+                    working_offset.x,
+                    working_offset.y,
+                    base_addr_str,
+                    self.theme.textStyle(),
+                );
+                working_offset.x += base_addr_str.len;
+
+                var byte_idx: usize = 0;
+                while (byte_idx < 16) : (byte_idx += 1) {
+                    const buffer_idx = idx + byte_idx;
+                    if (buffer_idx < buffer.len) {
+                        const byte_str = try std.fmt.allocPrint(
+                            arena,
+                            "{X:0>2} ",
+                            .{buffer[buffer_idx]},
                         );
+                        if (self.is_selected(buffer_idx)) {
+                            buf.setString(
+                                working_offset.x,
+                                working_offset.y,
+                                byte_str,
+                                self.theme.highlightStyle(),
+                            );
+                        } else {
+                            buf.setString(
+                                working_offset.x,
+                                working_offset.y,
+                                byte_str,
+                                self.theme.highlightStyle(),
+                            );
+                        }
+                        working_offset.x += byte_str.len;
                     } else {
-                        buf.setString(
-                            offset_area.x,
-                            offset_area.y,
-                            line,
-                            self.theme.primaryStyle(),
-                        );
+                        buf.setString(working_offset.x, working_offset.y, "   ", self.theme.textStyle());
+                        working_offset.x += 3;
                     }
                 }
-                idx += 1;
+                buf.setChar(working_offset.x, working_offset.y, '|', self.theme.textStyle());
+                working_offset.x += 1;
+
+                byte_idx = 0;
+                while (byte_idx < 16) : (byte_idx += 1) {
+                    const buffer_idx = idx + byte_idx;
+                    if (buffer_idx < buffer.len) {
+                        const local_char = buffer[buffer_idx];
+                        if (local_char >= 33 and local_char <= 126) {
+                            const byte_str = try std.fmt.allocPrint(
+                                arena,
+                                "{c}",
+                                .{buffer[buffer_idx]},
+                            );
+                            if (self.is_selected(buffer_idx)) {
+                                buf.setString(
+                                    working_offset.x,
+                                    working_offset.y,
+                                    byte_str,
+                                    self.theme.highlightStyle(),
+                                );
+                            } else {
+                                buf.setString(
+                                    working_offset.x,
+                                    working_offset.y,
+                                    byte_str,
+                                    self.theme.highlightStyle(),
+                                );
+                            }
+                            working_offset.x += byte_str.len;
+                        } else {
+                            if (self.is_selected(buffer_idx)) {
+                                buf.setChar(
+                                    working_offset.x,
+                                    working_offset.y,
+                                    '.',
+                                    self.theme.highlightStyle(),
+                                );
+                            } else {
+                                buf.setString(
+                                    working_offset.x,
+                                    working_offset.y,
+                                    '.',
+                                    self.theme.highlightStyle(),
+                                );
+                            }
+                            working_offset.x += 1;
+                        }
+                    } else {
+                        buf.setString(
+                            working_offset.x,
+                            working_offset.y,
+                            " ",
+                            self.theme.textStyle(),
+                        );
+                        working_offset.x += 1;
+                    }
+                }
+                buf.setChar(
+                    working_offset.x,
+                    working_offset.y,
+                    '|',
+                    self.theme.textStyle(),
+                );
+
             }
         }
         // TODO maybe think of "edit" mode to mimic model view controller style
