@@ -38,6 +38,11 @@ pub const Navigation = enum {
     right,
 };
 
+const Position = struct {
+    row: usize = 0,
+    col: usize = 0,
+};
+
 /// Structure to handle rendering the Memory within a region
 pub const RegionMemoryView = struct {
     /// main theme
@@ -49,7 +54,7 @@ pub const RegionMemoryView = struct {
     /// Currently loaded memory structure.
     memory: ?plunder.mem.Memory = null,
 
-    cursor: searchBar.Cursor = .{},
+    position: Position = .{},
 
     selection: ?Selection = null,
 
@@ -72,17 +77,17 @@ pub const RegionMemoryView = struct {
     }
 
     fn up(self: *RegionMemoryView, buf: []const u8) void {
-        if (self.cursor.row == 0) {
+        if (self.position.row == 0) {
             const line_idx = buf.len / 16;
-            self.cursor.row = line_idx - 1;
+            self.position.row = line_idx - 1;
         } else {
-            self.cursor.row -= 1;
+            self.position.row -= 1;
         }
     }
 
     fn down(self: *RegionMemoryView, buf: []const u8) void {
-        self.cursor.row += 1;
-        self.cursor.row = self.cursor.row % (buf.len / 16);
+        self.position.row += 1;
+        self.position.row = self.position.row % (buf.len / 16);
     }
 
     pub fn nav(self: *RegionMemoryView, dir: Navigation) void {
@@ -96,19 +101,19 @@ pub const RegionMemoryView = struct {
                         self.down(buf);
                     },
                     .left => {
-                        if (self.cursor.col == 0) {
-                            self.cursor.col = 15;
+                        if (self.position.col == 0) {
+                            self.position.col = 15;
                             self.up(buf);
                         } else {
-                            self.cursor.col -= 1;
+                            self.position.col -= 1;
                         }
                     },
                     .right => {
-                        if (self.cursor.col == 15) {
-                            self.cursor.col = 0;
+                        if (self.position.col == 15) {
+                            self.position.col = 0;
                             self.down(buf);
                         } else {
-                            self.cursor.col += 1;
+                            self.position.col += 1;
                         }
                     },
                 }
@@ -151,9 +156,10 @@ pub const RegionMemoryView = struct {
 
     fn is_selected(self: *RegionMemoryView, idx: usize) bool {
         if (self.selection == null) {
-            const cursor_idx = (self.cursor.row * 16) + self.cursor.col;
-            return idx == cursor_idx;
+            const position_idx = (self.position.row * 16) + self.position.col;
+            return idx == position_idx;
         }
+        return false;
     }
 
     /// Render functions for memory
@@ -168,12 +174,11 @@ pub const RegionMemoryView = struct {
             const offset_height = height - 4;
             self.scroll_offset = utils.calculate_scroll_offset(
                 self.scroll_offset,
-                self.cursor.row,
+                self.position.row,
                 offset_height,
             );
             var offset_area = area;
             offset_area.y += 1;
-            // TODO figure this out -- need to increment idx and offset_area
             var idx: usize = self.scroll_offset * 16;
             while (offset_area.y < height) : (offset_area.y += 1) {
                 var working_offset = offset_area;
@@ -185,7 +190,7 @@ pub const RegionMemoryView = struct {
                     base_addr_str,
                     self.theme.textStyle(),
                 );
-                working_offset.x += base_addr_str.len;
+                working_offset.x += @intCast(base_addr_str.len);
 
                 var byte_idx: usize = 0;
                 while (byte_idx < 16) : (byte_idx += 1) {
@@ -201,17 +206,17 @@ pub const RegionMemoryView = struct {
                                 working_offset.x,
                                 working_offset.y,
                                 byte_str,
-                                self.theme.highlightStyle(),
+                                self.theme.selectionStyle(),
                             );
                         } else {
                             buf.setString(
                                 working_offset.x,
                                 working_offset.y,
                                 byte_str,
-                                self.theme.highlightStyle(),
+                                self.theme.textStyle(),
                             );
                         }
-                        working_offset.x += byte_str.len;
+                        working_offset.x += @intCast(byte_str.len);
                     } else {
                         buf.setString(working_offset.x, working_offset.y, "   ", self.theme.textStyle());
                         working_offset.x += 3;
@@ -236,31 +241,31 @@ pub const RegionMemoryView = struct {
                                     working_offset.x,
                                     working_offset.y,
                                     byte_str,
-                                    self.theme.highlightStyle(),
+                                    self.theme.selectionStyle(),
                                 );
                             } else {
                                 buf.setString(
                                     working_offset.x,
                                     working_offset.y,
                                     byte_str,
-                                    self.theme.highlightStyle(),
+                                    self.theme.textStyle(),
                                 );
                             }
-                            working_offset.x += byte_str.len;
+                            working_offset.x += @intCast(byte_str.len);
                         } else {
                             if (self.is_selected(buffer_idx)) {
                                 buf.setChar(
                                     working_offset.x,
                                     working_offset.y,
                                     '.',
-                                    self.theme.highlightStyle(),
+                                    self.theme.selectionStyle(),
                                 );
                             } else {
-                                buf.setString(
+                                buf.setChar(
                                     working_offset.x,
                                     working_offset.y,
                                     '.',
-                                    self.theme.highlightStyle(),
+                                    self.theme.textStyle(),
                                 );
                             }
                             working_offset.x += 1;
@@ -282,6 +287,7 @@ pub const RegionMemoryView = struct {
                     self.theme.textStyle(),
                 );
 
+                idx += 16;
             }
         }
         // TODO maybe think of "edit" mode to mimic model view controller style
@@ -702,13 +708,36 @@ pub const MemoryView = struct {
         }
     }
 
+    pub fn memory_loaded(self: *MemoryView) bool {
+        return self.table.region_view.region_memory_view.is_loaded();
+    }
+
+    pub fn up_selection(self: *MemoryView) void {
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.nav(.up);
+        } else {
+            self.table.prev_selection();
+        }
+    }
+    pub fn down_selection(self: *MemoryView) void {
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.nav(.down);
+        } else {
+            self.table.next_selection();
+        }
+    }
+
     /// Next Selection action
     pub fn next_selection(self: *MemoryView) void {
-        self.table.next_selection();
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.nav(.right);
+        }
     }
     /// Previous Selection action
     pub fn prev_selection(self: *MemoryView) void {
-        self.table.prev_selection();
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.nav(.left);
+        }
     }
     /// Deselect action
     pub fn deselect(self: *MemoryView) void {

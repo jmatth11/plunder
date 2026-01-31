@@ -131,7 +131,6 @@ const View = struct {
     pub fn next_selection(self: *View) void {
         switch (self.focus) {
             0 => {
-                self.procColumn.next_selection();
             },
             1 => {
                 if (self.show_info) {
@@ -147,13 +146,41 @@ const View = struct {
     pub fn prev_selection(self: *View) void {
         switch (self.focus) {
             0 => {
-                self.procColumn.prev_selection();
             },
             1 => {
                 if (self.show_info) {
                     self.info_view.prev_selection();
                 } else {
                     self.memView.prev_selection();
+                }
+            },
+            else => {},
+        }
+    }
+
+    pub fn up_selection(self: *View) void {
+        switch (self.focus) {
+            0 => {
+                // for procColumn prev/next is up/down
+                self.procColumn.prev_selection();
+            },
+            1 => {
+                if (!self.show_info) {
+                    self.memView.up_selection();
+                }
+            },
+            else => {},
+        }
+    }
+    pub fn down_selection(self: *View) void {
+        switch (self.focus) {
+            0 => {
+                // for procColumn prev/next is up/down
+                self.procColumn.next_selection();
+            },
+            1 => {
+                if (!self.show_info) {
+                    self.memView.down_selection();
                 }
             },
             else => {},
@@ -200,8 +227,10 @@ pub fn main() !void {
                     .char => |c| {
                         if (!cur_view.search_mode) {
                             if (c == 'q' or c == 'Q') running = false;
-                            if (c == 'j') cur_view.next_selection();
-                            if (c == 'k') cur_view.prev_selection();
+                            if (c == 'j') cur_view.down_selection();
+                            if (c == 'k') cur_view.up_selection();
+                            if (c == 'h') cur_view.prev_selection();
+                            if (c == 'l') cur_view.next_selection();
                             if (c == 'b') cur_view.deselect();
                             if (c == 'i') {
                                 cur_view.show_info = !cur_view.show_info;
