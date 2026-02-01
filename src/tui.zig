@@ -5,6 +5,7 @@ const memoryView = @import("tui/MemoryView.zig");
 const errorView = @import("tui/ErrorView.zig");
 const infoView = @import("tui/InfoView.zig");
 const searchBar = @import("tui/SearchBar.zig");
+const editMemoryView = @import("tui/EditMemory.zig");
 const theme = tui.themes.dracula;
 
 /// Specific error message for top level "show-stopper" errors.
@@ -26,11 +27,14 @@ const View = struct {
     /// error message currently being displayed
     error_msg: ?[]const u8 = null,
 
+    /// Flag for running loop.
+    running: bool = true,
     /// Flag to show the info view.
     show_info: bool = false,
-
     /// Flag for search mode (allows user to filter the current view)
     search_mode: bool = false,
+    /// Flag for visual mode actions.
+    visual_mode: bool = false,
 
     // other views
 
@@ -42,6 +46,8 @@ const View = struct {
     info_view: infoView.InfoView,
     /// SearchBar view -- Handles filter lists of the focused window.
     search_bar: searchBar.SearchBar,
+    /// Edit Memory View -- Handles the memory editor.
+    edit_memory_view: editMemoryView.EditMemoryView,
 
     pub fn deinit(self: *View) void {
         if (self.error_msg) |err_msg| {
@@ -130,8 +136,7 @@ const View = struct {
     /// Next selection action.
     pub fn next_selection(self: *View) void {
         switch (self.focus) {
-            0 => {
-            },
+            0 => {},
             1 => {
                 if (self.show_info) {
                     self.info_view.next_selection();
@@ -145,8 +150,7 @@ const View = struct {
     /// Previous selection action.
     pub fn prev_selection(self: *View) void {
         switch (self.focus) {
-            0 => {
-            },
+            0 => {},
             1 => {
                 if (self.show_info) {
                     self.info_view.prev_selection();
@@ -158,6 +162,7 @@ const View = struct {
         }
     }
 
+    /// Up selection action
     pub fn up_selection(self: *View) void {
         switch (self.focus) {
             0 => {
@@ -172,6 +177,7 @@ const View = struct {
             else => {},
         }
     }
+    /// Down selection action
     pub fn down_selection(self: *View) void {
         switch (self.focus) {
             0 => {
@@ -184,6 +190,42 @@ const View = struct {
                 }
             },
             else => {},
+        }
+    }
+    /// Visual selection action.
+    pub fn visual_selection(self: *View) void {
+        switch (self.focus) {
+            0 => {},
+            1 => {
+                self.memView.memory_visual_selection();
+            },
+            else => {},
+        }
+    }
+
+    /// Key handler
+    pub fn key_handler(self: *View, c: u21) void {
+        if (!self.search_mode) {
+            if (c == 'q' or c == 'Q') self.running = false;
+            if (c == 'j') self.down_selection();
+            if (c == 'k') self.up_selection();
+            if (c == 'h') self.prev_selection();
+            if (c == 'l') self.next_selection();
+            if (c == 'b') self.deselect();
+            if (c == 'i') {
+                self.show_info = !self.show_info;
+            }
+            // TODO pull out to only work for certain views.
+            if (c == '/') {
+                self.search_mode = true;
+                // reset search text
+                self.search_bar.len = 0;
+            }
+            if (c == 'v') {
+                self.visual_selection();
+            }
+        } else {
+            self.search_bar.add(c);
         }
     }
 };
@@ -216,8 +258,7 @@ pub fn main() !void {
     defer cur_view.deinit();
 
     // main loop
-    var running = true;
-    while (running) {
+    while (cur_view.running) {
         // poll every 100 milliseconds
         const event = try backend.interface().pollEvent(100);
         // handle key events
@@ -225,24 +266,7 @@ pub fn main() !void {
             .key => |key| {
                 switch (key.code) {
                     .char => |c| {
-                        if (!cur_view.search_mode) {
-                            if (c == 'q' or c == 'Q') running = false;
-                            if (c == 'j') cur_view.down_selection();
-                            if (c == 'k') cur_view.up_selection();
-                            if (c == 'h') cur_view.prev_selection();
-                            if (c == 'l') cur_view.next_selection();
-                            if (c == 'b') cur_view.deselect();
-                            if (c == 'i') {
-                                cur_view.show_info = !cur_view.show_info;
-                            }
-                            if (c == '/') {
-                                cur_view.search_mode = true;
-                                // reset search text
-                                cur_view.search_bar.len = 0;
-                            }
-                        } else {
-                            cur_view.search_bar.add(c);
-                        }
+                        cur_view.key_handler(c);
                     },
                     .backspace => {
                         if (cur_view.search_mode) {
@@ -275,7 +299,7 @@ pub fn main() !void {
                         if (cur_view.search_mode) {
                             cur_view.search_mode = false;
                         } else {
-                            running = false;
+                            cur_view.running = false;
                         }
                     },
                     else => {},
@@ -351,6 +375,20 @@ pub fn main() !void {
                         view.error_last_shown = std.time.milliTimestamp();
                     }
                 }
+
+                if (view.edit_memory_view.is_loaded()) {
+                    const start_x: u16 = area.width * 0.2;
+                    const start_y: u16 = area.height * 0.2;
+                    const edit_memory_area: tui.Rect = .{
+                        .x = start_x,
+                        .y = start_y,
+                        .width = area.width - start_x,
+                        .height = area.height - start_y,
+                    };
+                    try view.edit_memory_view.render(edit_memory_area, buf);
+                }
+
+                // present last to show on top of everything.
                 if (view.error_msg) |err_msg| {
                     const error_block: tui.widgets.Block = .{
                         .title = "Error",

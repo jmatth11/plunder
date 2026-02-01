@@ -89,7 +89,7 @@ pub const Memory = struct {
         const end: usize = offset + self.buffer.?.len;
         const base_addr: usize = self.info.start_addr + self.starting_offset;
         while (offset < end) {
-            try writer.*.print("{X:0>12} ", .{base_addr + offset});
+            try writer.*.print("{X:0>12}: ", .{base_addr + offset});
             var byte_idx: usize = 0;
             while (byte_idx < 16) : (byte_idx += 1) {
                 const idx: usize = offset + byte_idx;
@@ -133,7 +133,7 @@ pub const Memory = struct {
         const base_addr: usize = self.info.start_addr + self.starting_offset;
         var buffer: [1024]u8 = @splat(0);
         var writer: std.io.Writer = .fixed(&buffer);
-        try writer.print("{X:0>12} ", .{base_addr + offset});
+        try writer.print("{X:0>12}: ", .{base_addr + offset});
         var byte_idx: usize = 0;
         while (byte_idx < 16) : (byte_idx += 1) {
             const idx: usize = offset + byte_idx;

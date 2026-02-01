@@ -11,26 +11,7 @@ pub const Errors = error{
     empty_region_name,
 };
 
-const Selection = struct {
-    start: usize = 0,
-    end: usize = 0,
-    limit: usize = 0,
-
-    pub fn forward(self: *Selection) void {
-        self.end += 1;
-        if (self.end >= self.limit) {
-            self.end = 0;
-        }
-    }
-    pub fn back(self: *Selection) void {
-        if (self.end == 0) {
-            self.end = self.limit - 1;
-        } else {
-            self.end -= 0;
-        }
-    }
-};
-
+/// Navigation options for cursor movement
 pub const Navigation = enum {
     up,
     down,
@@ -38,44 +19,44 @@ pub const Navigation = enum {
     right,
 };
 
-const Position = struct {
-    row: usize = 0,
-    col: usize = 0,
-};
-
 /// Structure to handle rendering the Memory within a region
 pub const RegionMemoryView = struct {
     /// main theme
     theme: tui.Theme = tui.themes.dracula,
-    /// Currently selected line
-    selected: usize = 0,
     /// Scroll offset
     scroll_offset: usize = 0,
     /// Currently loaded memory structure.
     memory: ?plunder.mem.Memory = null,
-
-    position: Position = .{},
-
-    selection: ?Selection = null,
+    /// Position of the cursor.
+    position: utils.Position = .{},
+    /// Structure to manage selection region.
+    selection: ?utils.Selection = null,
 
     /// Load a new memory to render.
     pub fn load(self: *RegionMemoryView, memory: plunder.mem.Memory) void {
         // we do not deinitialize memory because we don't own it.
         self.memory = memory;
-        self.selected = 0;
         self.scroll_offset = 0;
     }
 
-    pub fn start_selection(self: *RegionMemoryView) void {
+    /// Toggle the visual selection mode.
+    pub fn toggle_selection(self: *RegionMemoryView) void {
         if (self.memory) |memory| {
-            if (memory.buffer) |buf| {
-                self.selection = .{
-                    .limit = buf.len,
-                };
+            if (memory.buffer != null) {
+                if (self.selection == null) {
+                    const starting_position = self.position_to_index();
+                    self.selection = .{
+                        .start = starting_position,
+                        .end = starting_position,
+                    };
+                } else {
+                    self.selection = null;
+                }
             }
         }
     }
 
+    /// Up cursor movement
     fn up(self: *RegionMemoryView, buf: []const u8) void {
         if (self.position.row == 0) {
             const line_idx = buf.len / 16;
@@ -85,11 +66,13 @@ pub const RegionMemoryView = struct {
         }
     }
 
+    /// Down cursor movement
     fn down(self: *RegionMemoryView, buf: []const u8) void {
         self.position.row += 1;
         self.position.row = self.position.row % (buf.len / 16);
     }
 
+    /// Cursor navigation
     pub fn nav(self: *RegionMemoryView, dir: Navigation) void {
         if (self.memory) |memory| {
             if (memory.buffer) |buf| {
@@ -117,12 +100,12 @@ pub const RegionMemoryView = struct {
                         }
                     },
                 }
+                // if in selection mode update the end position
+                if (self.selection) |*selection| {
+                    selection.*.end = self.position_to_index();
+                }
             }
         }
-    }
-
-    pub fn clear_selection(self: *RegionMemoryView) void {
-        self.selection = null;
     }
 
     /// Unload the current memory.
@@ -136,27 +119,25 @@ pub const RegionMemoryView = struct {
         }
         return 0;
     }
-    /// Next selection action.
-    pub fn next_selection(self: *RegionMemoryView) void {
-        if (self.memory != null) {
-            self.selected += 1;
-            self.selected = self.selected % self.get_line_len();
-        }
-    }
-    /// Previous selection action.
-    pub fn prev_selection(self: *RegionMemoryView) void {
-        if (self.memory != null) {
-            if (self.selected == 0) {
-                self.selected = self.get_line_len() - 1;
-            } else {
-                self.selected -= 1;
-            }
-        }
+
+    /// Get the index into the memory buffer from the cursor position.
+    fn position_to_index(self: *RegionMemoryView) usize {
+        if (self.memory == null) return 0;
+        return self.position.to_index();
     }
 
+    /// Check if the given index is in the selection range.
     fn is_selected(self: *RegionMemoryView, idx: usize) bool {
-        if (self.selection == null) {
-            const position_idx = (self.position.row * 16) + self.position.col;
+        if (self.selection) |selection| {
+            var beg = selection.start;
+            var end = selection.end;
+            if (end < beg) {
+                beg = selection.end;
+                end = selection.start;
+            }
+            return idx >= beg and idx <= end;
+        } else {
+            const position_idx = self.position_to_index();
             return idx == position_idx;
         }
         return false;
@@ -169,6 +150,10 @@ pub const RegionMemoryView = struct {
             if (memory.buffer == null) return;
             buffer = memory.buffer.?;
             const height = area.y + area.height;
+            const highlight_selection: tui.Style = .{
+                .fg = .dark_gray,
+                .bg = self.theme.secondary,
+            };
             // minus 4 to account for the different level of offsets.
             // should have a better way of handling this
             const offset_height = height - 4;
@@ -183,15 +168,20 @@ pub const RegionMemoryView = struct {
             while (offset_area.y < height) : (offset_area.y += 1) {
                 var working_offset = offset_area;
                 const base_addr: usize = memory.info.start_addr + memory.starting_offset + idx;
-                const base_addr_str = try std.fmt.allocPrint(arena, "{X:0>12} ", .{base_addr});
+                const base_addr_str = try std.fmt.allocPrint(
+                    arena,
+                    "{X:0>12}: ",
+                    .{base_addr},
+                );
                 buf.setString(
                     working_offset.x,
                     working_offset.y,
                     base_addr_str,
-                    self.theme.textStyle(),
+                    self.theme.titleStyle(),
                 );
                 working_offset.x += @intCast(base_addr_str.len);
 
+                // the hex values
                 var byte_idx: usize = 0;
                 while (byte_idx < 16) : (byte_idx += 1) {
                     const buffer_idx = idx + byte_idx;
@@ -206,7 +196,7 @@ pub const RegionMemoryView = struct {
                                 working_offset.x,
                                 working_offset.y,
                                 byte_str,
-                                self.theme.selectionStyle(),
+                                highlight_selection,
                             );
                         } else {
                             buf.setString(
@@ -218,63 +208,54 @@ pub const RegionMemoryView = struct {
                         }
                         working_offset.x += @intCast(byte_str.len);
                     } else {
-                        buf.setString(working_offset.x, working_offset.y, "   ", self.theme.textStyle());
+                        buf.setString(
+                            working_offset.x,
+                            working_offset.y,
+                            "   ",
+                            self.theme.textStyle(),
+                        );
                         working_offset.x += 3;
                     }
                 }
-                buf.setChar(working_offset.x, working_offset.y, '|', self.theme.textStyle());
+                buf.setChar(
+                    working_offset.x,
+                    working_offset.y,
+                    '|',
+                    self.theme.textStyle(),
+                );
                 working_offset.x += 1;
 
+                // The character values
                 byte_idx = 0;
                 while (byte_idx < 16) : (byte_idx += 1) {
                     const buffer_idx = idx + byte_idx;
                     if (buffer_idx < buffer.len) {
                         const local_char = buffer[buffer_idx];
-                        if (local_char >= 33 and local_char <= 126) {
-                            const byte_str = try std.fmt.allocPrint(
-                                arena,
-                                "{c}",
-                                .{buffer[buffer_idx]},
-                            );
-                            if (self.is_selected(buffer_idx)) {
-                                buf.setString(
-                                    working_offset.x,
-                                    working_offset.y,
-                                    byte_str,
-                                    self.theme.selectionStyle(),
-                                );
-                            } else {
-                                buf.setString(
-                                    working_offset.x,
-                                    working_offset.y,
-                                    byte_str,
-                                    self.theme.textStyle(),
-                                );
-                            }
-                            working_offset.x += @intCast(byte_str.len);
-                        } else {
-                            if (self.is_selected(buffer_idx)) {
-                                buf.setChar(
-                                    working_offset.x,
-                                    working_offset.y,
-                                    '.',
-                                    self.theme.selectionStyle(),
-                                );
-                            } else {
-                                buf.setChar(
-                                    working_offset.x,
-                                    working_offset.y,
-                                    '.',
-                                    self.theme.textStyle(),
-                                );
-                            }
-                            working_offset.x += 1;
+                        var cur_char: u8 = '.';
+                        if (utils.is_printable(local_char)) {
+                            cur_char = buffer[buffer_idx];
                         }
+                        if (self.is_selected(buffer_idx)) {
+                            buf.setChar(
+                                working_offset.x,
+                                working_offset.y,
+                                cur_char,
+                                highlight_selection,
+                            );
+                        } else {
+                            buf.setChar(
+                                working_offset.x,
+                                working_offset.y,
+                                cur_char,
+                                self.theme.textStyle(),
+                            );
+                        }
+                        working_offset.x += 1;
                     } else {
-                        buf.setString(
+                        buf.setChar(
                             working_offset.x,
                             working_offset.y,
-                            " ",
+                            ' ',
                             self.theme.textStyle(),
                         );
                         working_offset.x += 1;
@@ -290,7 +271,6 @@ pub const RegionMemoryView = struct {
                 idx += 16;
             }
         }
-        // TODO maybe think of "edit" mode to mimic model view controller style
     }
 
     /// Is memory view currently loaded with a memory.
@@ -354,9 +334,7 @@ pub const RegionView = struct {
 
     /// Next selection action
     pub fn next_selection(self: *RegionView) void {
-        if (self.region_memory_view.is_loaded()) {
-            self.region_memory_view.next_selection();
-        } else {
+        if (!self.region_memory_view.is_loaded()) {
             if (self.region != null) {
                 self.selected += 1;
                 self.selected = self.selected % self.get_region_line_len();
@@ -365,9 +343,7 @@ pub const RegionView = struct {
     }
     /// Previous selection action
     pub fn prev_selection(self: *RegionView) void {
-        if (self.region_memory_view.is_loaded()) {
-            self.region_memory_view.prev_selection();
-        } else {
+        if (!self.region_memory_view.is_loaded()) {
             if (self.region != null) {
                 if (self.selected == 0) {
                     self.selected = self.get_region_line_len() - 1;
@@ -708,10 +684,19 @@ pub const MemoryView = struct {
         }
     }
 
+    /// Check if a memory view is loaded.
     pub fn memory_loaded(self: *MemoryView) bool {
         return self.table.region_view.region_memory_view.is_loaded();
     }
 
+    /// Toggle the memory view visual selection.
+    pub fn memory_visual_selection(self: *MemoryView) void {
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.toggle_selection();
+        }
+    }
+
+    /// Up selection action.
     pub fn up_selection(self: *MemoryView) void {
         if (self.memory_loaded()) {
             self.table.region_view.region_memory_view.nav(.up);
@@ -719,6 +704,7 @@ pub const MemoryView = struct {
             self.table.prev_selection();
         }
     }
+    /// Down selection action.
     pub fn down_selection(self: *MemoryView) void {
         if (self.memory_loaded()) {
             self.table.region_view.region_memory_view.nav(.down);
@@ -755,7 +741,12 @@ pub const MemoryView = struct {
         // the same amount of things each time
         _ = self.arena.reset(.retain_capacity);
         // conditional title
-        const title = if (self.table.region_view.is_loaded()) " Memory View - [i] toggle Info view; [b] back " else " Memory View - [i] toggle Info view ";
+        var title: []const u8 = " Memory View - [i] toggle Info view ";
+        if (self.memory_loaded()) {
+            title = " Memory View - [i] toggle Info view; [b] back; [v] visual select ";
+        } else if (self.table.region_view.is_loaded()) {
+            title = " Memory View - [i] toggle Info view; [b] back ";
+        }
         const block: tui.widgets.Block = .{
             .style = self.theme.baseStyle(),
             .borders = tui.widgets.Borders.all(),

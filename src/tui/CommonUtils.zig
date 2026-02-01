@@ -1,5 +1,24 @@
 const std = @import("std");
 
+/// Selection structure.
+/// Keeps track of visual selection with the memory viewer.
+pub const Selection = struct {
+    start: usize = 0,
+    end: usize = 0,
+};
+
+/// Position structure to track cursor position for entire buffer.
+pub const Position = struct {
+    row: usize = 0,
+    col: usize = 0,
+
+    /// Convert position into index into an array.
+    /// This function assumes each line is a 16 byte hex dump.
+    pub fn to_index(self: *const Position) usize {
+        return (self.position.row * 16) + self.position.col;
+    }
+};
+
 /// Calculate the scroll offset with the given information.
 ///
 /// @param scroll_offset The current scroll offset
@@ -17,4 +36,9 @@ pub fn calculate_scroll_offset(scroll_offset: usize, cur_pos: usize, height: usi
     }
     // keep the same
     return scroll_offset;
+}
+
+/// Check if character is printable.
+pub fn is_printable(c: u21) bool {
+    return (c >= 32 and c <= 126) or (c >= 128 and c <= 254);
 }
