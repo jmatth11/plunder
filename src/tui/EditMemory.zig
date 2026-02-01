@@ -3,6 +3,7 @@ const tui = @import("zigtui");
 const utils = @import("CommonUtils.zig");
 const plunder = @import("plunder");
 const memoryView = @import("MemoryView.zig");
+const errorView = @import("ErrorView.zig");
 
 const EntryMode = enum {
     text,
@@ -12,14 +13,17 @@ const EntryMode = enum {
 pub const EditMemoryView = struct {
     /// Main allocator
     alloc: std.mem.Allocator,
+    /// Arena allocator
+    arena: std.heap.ArenaAllocator,
     /// Main theme
     theme: tui.Theme = tui.themes.dracula,
     /// The memory to edit.
-    memory: ?plunder.mem.Memory = null,
+    memory: ?plunder.mem.MutableMemory = null,
     /// Text entry mode.
     entry_mode: EntryMode = .hex,
     /// Position of the cursor.
     position: utils.Position = .{},
+    scroll_offset: usize = 0,
     /// The working buffer.
     working_buffer: [2]u8 = @splat(0),
     working_buffer_len: usize = 0,
@@ -27,8 +31,24 @@ pub const EditMemoryView = struct {
     pub fn init(alloc: std.mem.Allocator) EditMemoryView {
         return .{
             .alloc = alloc,
+            .arena = .init(alloc),
         };
     }
+
+    pub fn load(self: *EditMemoryView, new_memory: plunder.mem.MutableMemory) void {
+        if (self.memory) |*memory| {
+            memory.*.deinit();
+        }
+        self.memory = new_memory;
+    }
+
+    pub fn unload(self: *EditMemoryView) void {
+        if (self.memory) |*memory| {
+            memory.*.deinit();
+            self.memory = null;
+        }
+    }
+
     /// Up cursor movement
     fn up(self: *EditMemoryView, buf: []const u8) void {
         if (self.position.row == 0) {
@@ -52,7 +72,7 @@ pub const EditMemoryView = struct {
                 if (idx < buf.len) {
                     const byte = buf[idx];
                     const hex_str = std.fmt.hex(byte);
-                    std.mem.copyForwards(u8, self.working_buffer[0..], hex_str);
+                    std.mem.copyForwards(u8, self.working_buffer[0..], hex_str[0..]);
                     self.working_buffer_len = 2;
                 }
             }
@@ -63,17 +83,18 @@ pub const EditMemoryView = struct {
             if (memory.buffer) |buf| {
                 const idx = self.position.to_index();
                 if (idx < buf.len) {
-                    buf[idx] = try std.fmt.parseInt(
+                    buf[idx] = std.fmt.parseInt(
                         u8,
                         self.working_buffer[0..],
                         16,
-                    );
+                    ) catch 0;
                 }
             }
         }
     }
 
     pub fn add_character(self: *EditMemoryView, c: u21) !void {
+        var error_view = try errorView.get_error_view();
         switch (self.entry_mode) {
             .hex => {
                 if (c < 256) {
@@ -82,7 +103,12 @@ pub const EditMemoryView = struct {
                         if (self.working_buffer_len < 2) {
                             self.working_buffer[self.working_buffer_len] = local_c;
                             self.working_buffer_len += 1;
+                            if (self.working_buffer_len == 2) {
+                                self.nav(.right);
+                            }
                         }
+                    } else {
+                        try error_view.add("Must be a hex number: 0-9, A-F.");
                     }
                 } else {}
             },
@@ -90,9 +116,35 @@ pub const EditMemoryView = struct {
                 const max_value = std.math.maxInt(u16);
                 if (c <= max_value) {
                     const local_c: u16 = @intCast(c);
-                    _ = try std.fmt.hexToBytes(self.working_buffer[0..], local_c);
+                    const hex_str = std.fmt.hex(local_c);
+                    std.mem.copyForwards(u8, self.working_buffer[0..], hex_str[0..]);
+                    self.nav(.right);
+                } else {
+                    try error_view.add("Currently unsupported text value. Must be unicode codepoint between 0x0-0xFFFF.");
                 }
             },
+        }
+    }
+
+    pub fn delete_character(self: *EditMemoryView) void {
+        var clear: bool = false;
+        switch (self.entry_mode) {
+            .hex => {
+                if (self.working_buffer_len > 0) {
+                    self.working_buffer_len -= 1;
+                } else {
+                    clear = true;
+                }
+            },
+            .text => {
+                clear = true;
+            },
+        }
+        if (clear) {
+            self.working_buffer[0] = 0;
+            self.working_buffer[1] = 0;
+            self.working_buffer_len = 2;
+            self.nav(.left);
         }
     }
 
@@ -145,10 +197,16 @@ pub const EditMemoryView = struct {
     }
 
     /// Render edit memory view
-    pub fn render(self: *EditMemoryView, arena: std.mem.Allocator, area: tui.Rect, buf: *tui.render.Buffer) !void {
+    pub fn render(self: *EditMemoryView, area: tui.Rect, buf: *tui.render.Buffer) !void {
+        const arena = self.arena.allocator();
+        _ = self.arena.reset(.retain_capacity);
         const height = area.height;
+        var title: []const u8 = " Memory Editor (HEX Mode) ";
+        if (self.entry_mode == .text) {
+            title = " Memory Editor (TEXT Mode) ";
+        }
         const block: tui.widgets.Block = .{
-            .title = " Memory Editor ",
+            .title = title,
             .title_style = self.theme.titleStyle(),
             .borders = .all(),
             .border_symbols = .rounded(),
@@ -286,6 +344,13 @@ pub const EditMemoryView = struct {
 
     /// Check if edit memory view is loaded.
     pub fn is_loaded(self: *EditMemoryView) bool {
-        return self.buffer != null;
+        return self.memory != null;
+    }
+
+    pub fn deinit(self: *EditMemoryView) void {
+        self.arena.deinit();
+        if (self.memory) |*memory| {
+            memory.*.deinit();
+        }
     }
 };

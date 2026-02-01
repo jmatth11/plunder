@@ -32,6 +32,31 @@ pub const RegionMemoryView = struct {
     /// Structure to manage selection region.
     selection: ?utils.Selection = null,
 
+    pub fn get_editable_memory(self: *RegionMemoryView, alloc: std.mem.Allocator) !?plunder.mem.MutableMemory {
+        if (self.memory) |memory| {
+            if (memory.info.is_write()) {
+                if (self.selection) |selection| {
+                    var start = selection.start;
+                    var end = selection.end;
+                    if (end < start) {
+                        start = selection.end;
+                        end = selection.start;
+                    } else if (end == start) {
+                        end += 1;
+                    }
+                    return try memory.to_mutable_range(alloc, start, end);
+                }
+            } else {
+                if (errorView.get_error_view()) |error_view| {
+                    try error_view.add("Memory is not writable.\n");
+                } else |err| {
+                    std.log.err("Error: {any}\n", .{err});
+                }
+            }
+        }
+        return null;
+    }
+
     /// Load a new memory to render.
     pub fn load(self: *RegionMemoryView, memory: plunder.mem.Memory) void {
         // we do not deinitialize memory because we don't own it.
@@ -694,6 +719,14 @@ pub const MemoryView = struct {
         if (self.memory_loaded()) {
             self.table.region_view.region_memory_view.toggle_selection();
         }
+    }
+
+    /// Toggle the memory view visual selection.
+    pub fn get_mutable_memory(self: *MemoryView) !?plunder.mem.MutableMemory {
+        if (self.memory_loaded()) {
+            return try self.table.region_view.region_memory_view.get_editable_memory(self.alloc);
+        }
+        return null;
     }
 
     /// Up selection action.

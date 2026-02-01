@@ -15,6 +15,8 @@ const ErrorMessage = struct {
 
 /// Main view structure for the TUI.
 const View = struct {
+    /// Main allocator
+    alloc: std.mem.Allocator,
     /// Window focus variable
     focus: usize = 0,
     /// show-stopper error message.
@@ -114,6 +116,31 @@ const View = struct {
         }
     }
 
+    pub fn visual_select(self: *View) !void {
+        switch (self.focus) {
+            1 => {
+                if (self.visual_mode) {
+                    if (self.memView.get_mutable_memory()) |memory| {
+                        if (memory) |mem| {
+                            self.edit_memory_view.load(mem);
+                        } else {
+                            try self.error_view.add("Memory was null.\n");
+                        }
+                    } else |err| {
+                        const msg = try std.fmt.allocPrint(
+                            self.alloc,
+                            "Error with getting mutable memory: {any}\n",
+                            .{err},
+                        );
+                        defer self.alloc.free(msg);
+                        try self.error_view.add(msg);
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+
     /// Change focus to next view.
     pub fn change_focus(self: *View) void {
         self.focus += 1;
@@ -138,7 +165,9 @@ const View = struct {
         switch (self.focus) {
             0 => {},
             1 => {
-                if (self.show_info) {
+                if (self.edit_memory_view.is_loaded()) {
+                    self.edit_memory_view.nav(.right);
+                } else if (self.show_info) {
                     self.info_view.next_selection();
                 } else {
                     self.memView.next_selection();
@@ -152,7 +181,9 @@ const View = struct {
         switch (self.focus) {
             0 => {},
             1 => {
-                if (self.show_info) {
+                if (self.edit_memory_view.is_loaded()) {
+                    self.edit_memory_view.nav(.left);
+                } else if (self.show_info) {
                     self.info_view.prev_selection();
                 } else {
                     self.memView.prev_selection();
@@ -170,7 +201,9 @@ const View = struct {
                 self.procColumn.prev_selection();
             },
             1 => {
-                if (!self.show_info) {
+                if (self.edit_memory_view.is_loaded()) {
+                    self.edit_memory_view.nav(.up);
+                } else if (!self.show_info) {
                     self.memView.up_selection();
                 }
             },
@@ -185,7 +218,9 @@ const View = struct {
                 self.procColumn.next_selection();
             },
             1 => {
-                if (!self.show_info) {
+                if (self.edit_memory_view.is_loaded()) {
+                    self.edit_memory_view.nav(.down);
+                } else if (!self.show_info) {
                     self.memView.down_selection();
                 }
             },
@@ -197,7 +232,21 @@ const View = struct {
         switch (self.focus) {
             0 => {},
             1 => {
-                self.memView.memory_visual_selection();
+                if (!self.edit_memory_view.is_loaded()) {
+                    self.memView.memory_visual_selection();
+                    self.visual_mode = !self.visual_mode;
+                }
+            },
+            else => {},
+        }
+    }
+
+    pub fn toggle_search_mode(self: *View) void {
+        switch (self.focus) {
+            0 => {
+                self.search_mode = true;
+                // reset search text
+                self.search_bar.len = 0;
             },
             else => {},
         }
@@ -205,7 +254,11 @@ const View = struct {
 
     /// Key handler
     pub fn key_handler(self: *View, c: u21) void {
-        if (!self.search_mode) {
+        if (self.search_mode) {
+            self.search_bar.add(c);
+        } else if (self.edit_memory_view.is_loaded()) {
+            self.edit_memory_view.add_character(c) catch {};
+        } else {
             if (c == 'q' or c == 'Q') self.running = false;
             if (c == 'j') self.down_selection();
             if (c == 'k') self.up_selection();
@@ -215,17 +268,8 @@ const View = struct {
             if (c == 'i') {
                 self.show_info = !self.show_info;
             }
-            // TODO pull out to only work for certain views.
-            if (c == '/') {
-                self.search_mode = true;
-                // reset search text
-                self.search_bar.len = 0;
-            }
-            if (c == 'v') {
-                self.visual_selection();
-            }
-        } else {
-            self.search_bar.add(c);
+            if (c == '/') self.toggle_search_mode();
+            if (c == 'v') self.visual_selection();
         }
     }
 };
@@ -249,11 +293,13 @@ pub fn main() !void {
 
     // instantiate our main view.
     var cur_view: View = .{
+        .alloc = allocator,
         .procColumn = .init(allocator),
         .memView = .init(allocator),
         .info_view = .init(allocator),
         .search_bar = .init(allocator),
         .error_view = try errorView.get_error_view(),
+        .edit_memory_view = .init(allocator),
     };
     defer cur_view.deinit();
 
@@ -271,32 +317,57 @@ pub fn main() !void {
                     .backspace => {
                         if (cur_view.search_mode) {
                             cur_view.search_bar.delete();
+                        } else if (cur_view.edit_memory_view.is_loaded()) {
+                            cur_view.edit_memory_view.delete_character();
                         }
                     },
                     .tab => {
-                        if (!cur_view.search_mode) {
+                        if (cur_view.edit_memory_view.is_loaded()) {
+                            cur_view.edit_memory_view.toggle_entry_mode();
+                        } else if (!cur_view.search_mode) {
                             cur_view.change_focus();
                         }
                     },
                     .up => {
-                        if (!cur_view.search_mode) {
+                        if (cur_view.edit_memory_view.is_loaded()) {
+                            cur_view.edit_memory_view.nav(.up);
+                        } else if (!cur_view.search_mode) {
                             cur_view.prev_selection();
                         }
                     },
                     .down => {
-                        if (!cur_view.search_mode) {
+                        if (cur_view.edit_memory_view.is_loaded()) {
+                            cur_view.edit_memory_view.nav(.down);
+                        } else if (!cur_view.search_mode) {
                             cur_view.next_selection();
                         }
                     },
+                    .left => {
+                        if (cur_view.edit_memory_view.is_loaded()) {
+                            cur_view.edit_memory_view.nav(.left);
+                        }
+                    },
+                    .right => {
+                        if (cur_view.edit_memory_view.is_loaded()) {
+                            cur_view.edit_memory_view.nav(.right);
+                        }
+                    },
                     .enter => {
-                        if (cur_view.search_mode) {
+                        if (cur_view.edit_memory_view.is_loaded()) {
+                            // TODO implement taking the edited memory and
+                            // writing it out. Update the original buffer too.
+                        } else if (cur_view.visual_mode) {
+                            try cur_view.visual_select();
+                        } else if (cur_view.search_mode) {
                             try cur_view.set_filter();
                         } else {
                             try cur_view.select();
                         }
                     },
                     .esc => {
-                        if (cur_view.search_mode) {
+                        if (cur_view.edit_memory_view.is_loaded()) {
+                            cur_view.edit_memory_view.unload();
+                        } else if (cur_view.search_mode) {
                             cur_view.search_mode = false;
                         } else {
                             cur_view.running = false;
@@ -377,8 +448,8 @@ pub fn main() !void {
                 }
 
                 if (view.edit_memory_view.is_loaded()) {
-                    const start_x: u16 = area.width * 0.2;
-                    const start_y: u16 = area.height * 0.2;
+                    const start_x: u16 = @intFromFloat(@as(f32, @floatFromInt(area.width)) * 0.2);
+                    const start_y: u16 = @intFromFloat(@as(f32, @floatFromInt(area.height)) * 0.2);
                     const edit_memory_area: tui.Rect = .{
                         .x = start_x,
                         .y = start_y,

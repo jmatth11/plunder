@@ -15,7 +15,7 @@ pub const Position = struct {
     /// Convert position into index into an array.
     /// This function assumes each line is a 16 byte hex dump.
     pub fn to_index(self: *const Position) usize {
-        return (self.position.row * 16) + self.position.col;
+        return (self.row * 16) + self.col;
     }
 };
 
@@ -40,5 +40,5 @@ pub fn calculate_scroll_offset(scroll_offset: usize, cur_pos: usize, height: usi
 
 /// Check if character is printable.
 pub fn is_printable(c: u21) bool {
-    return (c >= 32 and c <= 126) or (c >= 128 and c <= 254);
+    return (c >= 32 and c <= 126);
 }

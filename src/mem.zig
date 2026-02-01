@@ -12,6 +12,43 @@ pub const Errors = error{
     not_writable,
 };
 
+pub const MutableMemory = struct {
+    alloc: std.mem.Allocator = undefined,
+    /// Mapped info data.
+    info: map.Info = undefined,
+    /// Starting offset is set if the buffer starts later than info.start_addr.
+    starting_offset: usize = 0,
+    /// Memory buffer
+    buffer: ?[]u8 = null,
+
+    /// Initialize with a given mapped info structure.
+    pub fn init(alloc: std.mem.Allocator, info: *const map.Info) !MutableMemory {
+        const result: MutableMemory = .{
+            .alloc = alloc,
+            .info = try info.dupe(alloc),
+        };
+        return result;
+    }
+    /// Initialize with a given buffer and mapped info structure.
+    pub fn init_with_buffer(alloc: std.mem.Allocator, buffer: []const u8, info: *const map.Info) !MutableMemory {
+        var result: MutableMemory = .{
+            .alloc = alloc,
+        };
+        result.info = try info.dupe(alloc);
+        result.buffer = try result.alloc.dupe(u8, buffer);
+        return result;
+    }
+
+    /// Deinitialize.
+    pub fn deinit(self: *MutableMemory) void {
+        self.info.deinit();
+        if (self.buffer) |buf| {
+            self.alloc.free(buf);
+            self.buffer = null;
+        }
+    }
+};
+
 /// Memory structure to hold the buffer of mapped memory.
 pub const Memory = struct {
     alloc: std.mem.Allocator = undefined,
@@ -163,11 +200,35 @@ pub const Memory = struct {
     }
 
     /// Create a duplicate of the memory structure with a given allocator.
-    pub fn dupe(self: *Memory, alloc: std.mem.Allocator) !Memory {
+    pub fn dupe(self: *const Memory, alloc: std.mem.Allocator) !Memory {
         if (self.buffer) |buffer| {
             return try .init_with_buffer(alloc, buffer, &self.info);
         } else {
-            return try .init(alloc, self.info);
+            return try .init(alloc, &self.info);
+        }
+    }
+
+    /// Create a mutable copy of the memory.
+    pub fn to_mutable(self: *const Memory, alloc: std.mem.Allocator) !MutableMemory {
+        if (self.buffer) |buffer| {
+            return try .init_with_buffer(alloc, buffer, &self.info);
+        } else {
+            return try .init(alloc, &self.info);
+        }
+    }
+
+    /// Create a mutable copy of the memory.
+    pub fn to_mutable_range(self: *const Memory, alloc: std.mem.Allocator, start: usize, end: usize) !MutableMemory {
+        if (self.buffer) |buffer| {
+            if (start < buffer.len and end < buffer.len and start < end) {
+                var result: MutableMemory = try .init_with_buffer(alloc, buffer[start..end], &self.info);
+                result.starting_offset = start;
+                return result;
+            } else {
+                return Errors.out_of_bounds;
+            }
+        } else {
+            return try .init(alloc, &self.info);
         }
     }
 
