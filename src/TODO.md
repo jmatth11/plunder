@@ -1,2 +1,4 @@
 - [ ] Properly handle proc objects/info if proc comes down after our first query
 - [ ] Redo unit tests in map.zig to use new parse_map_line function for testing.
+- [ ] Encountered integer over flow when searching on memory. with new column value.
+- [ ] Edit memory window still comes up if in search mode. fix this
