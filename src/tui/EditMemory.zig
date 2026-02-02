@@ -40,6 +40,10 @@ pub const EditMemoryView = struct {
             memory.*.deinit();
         }
         self.memory = new_memory;
+        self.load_working_buffer();
+        self.position.row = 0;
+        self.position.col = 0;
+        self.scroll_offset = 0;
     }
 
     pub fn unload(self: *EditMemoryView) void {
@@ -53,7 +57,7 @@ pub const EditMemoryView = struct {
     fn up(self: *EditMemoryView, buf: []const u8) void {
         if (self.position.row == 0) {
             const line_idx = buf.len / 16;
-            self.position.row = line_idx - 1;
+            self.position.row = line_idx;
         } else {
             self.position.row -= 1;
         }
@@ -85,7 +89,7 @@ pub const EditMemoryView = struct {
                 if (idx < buf.len) {
                     buf[idx] = std.fmt.parseInt(
                         u8,
-                        self.working_buffer[0..],
+                        self.get_working_buffer(),
                         16,
                     ) catch 0;
                 }
@@ -93,13 +97,55 @@ pub const EditMemoryView = struct {
         }
     }
 
+    fn get_working_buffer(self: *EditMemoryView) []const u8 {
+        if (self.working_buffer_len == 0) {
+            self.working_buffer[0] = 0;
+            self.working_buffer[1] = 0;
+            self.working_buffer_len = 2;
+            return self.working_buffer[0..];
+        }
+        if (self.working_buffer_len == 1) {
+            self.working_buffer[1] = self.working_buffer[0];
+            self.working_buffer[0] = 0;
+            self.working_buffer_len = 2;
+            return self.working_buffer[0..];
+        }
+        return self.working_buffer[0..];
+    }
+
+    fn print_working_buffer(self: *EditMemoryView, arena: std.mem.Allocator) ![]const u8 {
+        if (self.working_buffer_len == 1) {
+            var c = self.working_buffer[0];
+            if (std.ascii.isAlphabetic(c)) {
+                c = std.ascii.toUpper(c);
+            }
+            return try std.fmt.allocPrint(arena, "{c}  ", .{c});
+        }
+        if (self.working_buffer_len == 2) {
+            var c = self.working_buffer[0];
+            if (std.ascii.isAlphabetic(c)) {
+                c = std.ascii.toUpper(c);
+            }
+            var c2 = self.working_buffer[1];
+            if (std.ascii.isAlphabetic(c2)) {
+                c2 = std.ascii.toUpper(c2);
+            }
+            return try std.fmt.allocPrint(arena, "{c}{c}  ", .{c, c2});
+        }
+        return try arena.dupe(u8, "   ");
+    }
+
     pub fn add_character(self: *EditMemoryView, c: u21) !void {
         var error_view = try errorView.get_error_view();
         switch (self.entry_mode) {
             .hex => {
                 if (c < 256) {
-                    const local_c: u8 = @intCast(c);
+                    var local_c: u8 = @intCast(c);
                     if (std.ascii.isHex(local_c)) {
+                        // capitalize letters
+                        if (std.ascii.isAlphabetic(local_c)){
+                            local_c = std.ascii.toUpper(local_c);
+                        }
                         if (self.working_buffer_len < 2) {
                             self.working_buffer[self.working_buffer_len] = local_c;
                             self.working_buffer_len += 1;
@@ -113,9 +159,9 @@ pub const EditMemoryView = struct {
                 } else {}
             },
             .text => {
-                const max_value = std.math.maxInt(u16);
+                const max_value = std.math.maxInt(u8);
                 if (c <= max_value) {
-                    const local_c: u16 = @intCast(c);
+                    const local_c: u8 = @intCast(c);
                     const hex_str = std.fmt.hex(local_c);
                     std.mem.copyForwards(u8, self.working_buffer[0..], hex_str[0..]);
                     self.nav(.right);
@@ -255,12 +301,8 @@ pub const EditMemoryView = struct {
                 while (byte_idx < 16) : (byte_idx += 1) {
                     const buffer_idx = idx + byte_idx;
                     if (buffer_idx < buffer.len) {
-                        const byte_str = try std.fmt.allocPrint(
-                            arena,
-                            "{X:0>2} ",
-                            .{buffer[buffer_idx]},
-                        );
                         if (self.is_selected(buffer_idx)) {
+                            const byte_str = try self.print_working_buffer(arena);
                             buf.setString(
                                 working_offset.x,
                                 working_offset.y,
@@ -268,6 +310,11 @@ pub const EditMemoryView = struct {
                                 highlight_selection,
                             );
                         } else {
+                            const byte_str = try std.fmt.allocPrint(
+                                arena,
+                                "{X:0>2} ",
+                                .{buffer[buffer_idx]},
+                            );
                             buf.setString(
                                 working_offset.x,
                                 working_offset.y,
@@ -275,7 +322,7 @@ pub const EditMemoryView = struct {
                                 self.theme.textStyle(),
                             );
                         }
-                        working_offset.x += @intCast(byte_str.len);
+                        working_offset.x += 3;
                     } else {
                         buf.setString(
                             working_offset.x,
@@ -305,10 +352,18 @@ pub const EditMemoryView = struct {
                             cur_char = buffer[buffer_idx];
                         }
                         if (self.is_selected(buffer_idx)) {
+                            var text_char = cur_char;
+                            if (self.working_buffer_len == 2) {
+                                var out: [1]u8 = @splat(0);
+                                _ = try std.fmt.hexToBytes(&out, self.working_buffer[0..]);
+                                if (utils.is_printable(out[0])) {
+                                    text_char = out[0];
+                                }
+                            }
                             buf.setChar(
                                 working_offset.x,
                                 working_offset.y,
-                                cur_char,
+                                text_char,
                                 highlight_selection,
                             );
                         } else {

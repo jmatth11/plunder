@@ -85,7 +85,7 @@ pub const RegionMemoryView = struct {
     fn up(self: *RegionMemoryView, buf: []const u8) void {
         if (self.position.row == 0) {
             const line_idx = buf.len / 16;
-            self.position.row = line_idx - 1;
+            self.position.row = line_idx;
         } else {
             self.position.row -= 1;
         }
