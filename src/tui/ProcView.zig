@@ -150,6 +150,11 @@ pub const ProcView = struct {
         }
     }
 
+    /// Reload the view.
+    pub fn reload(self: *ProcView) !void {
+        try self.set_filter(null);
+    }
+
     /// Generate rows for the table
     fn gen_rows(self: *ProcView) !void {
         if (self.rows == null) {

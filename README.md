@@ -27,18 +27,26 @@ Current functionality:
     - Get the list of region names
     - Read the raw data from the Region.
     - Read only populated data from the Region.
+    - Filter regions of memory by scanning all memory between regions for a
+      specified search term.
 - Write to memory to a given process.
 - Read basic network information from a given process.
     - Read what ports and protocols a process is using.
 
 ### TUI Features
 
-Currently the TUI only implements a subset of what the library can do.
+Most of the instructions for using the TUI are documented at the top of each
+panel in the TUI itself.
 
 Functionality list:
 - View all processes currently running on the machine.
 - View memory regions, raw memory within regions, and process info (cmd line args, env args, network info).
 - Filter process list for quickly finding process to view. Filter works on process id and process name.
+- Filter on Memory regions by a text you are searching for in memory.
+- Search through the memory view for a specific text in memory.
+- Edit memory selection in memory view.
+    - Edit in hex or text mode.
+- Refresh process data in TUI.
 
 ## Build
 

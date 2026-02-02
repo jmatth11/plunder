@@ -312,6 +312,12 @@ const View = struct {
         }
     }
 
+    pub fn refresh(self: *View) !void {
+        self.memView.unload();
+        self.info_view.unload();
+        try self.procColumn.reload();
+    }
+
     /// Key handler
     pub fn key_handler(self: *View, c: u21) !void {
         if (self.search_mode) {
@@ -330,6 +336,7 @@ const View = struct {
                 self.show_info = !self.show_info;
                 self.visual_mode = false;
             }
+            if (c == 'r') try self.refresh();
             if (c == '/') self.toggle_search_mode();
             if (c == 'v') self.visual_selection();
         }
@@ -454,7 +461,7 @@ pub fn main() !void {
                 };
                 // setup main block
                 const block: tui.widgets.Block = .{
-                    .title = " Plunder — [q] quit; [j/k] down/up; [tab] switch focus ",
+                    .title = " Plunder — [q] quit; [j/k] down/up; [tab] switch focus; [r] refresh all data ",
                     .style = theme.baseStyle(),
                     .borders = tui.widgets.Borders.all(),
                     .border_style = theme.borderFocusedStyle(),
