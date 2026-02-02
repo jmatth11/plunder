@@ -391,10 +391,10 @@ pub fn main() !void {
                     .enter => {
                         if (cur_view.edit_memory_view.is_loaded()) {
                             try cur_view.write_memory();
-                        } else if (cur_view.visual_mode) {
-                            try cur_view.visual_select();
                         } else if (cur_view.search_mode) {
                             try cur_view.set_filter();
+                        } else if (cur_view.visual_mode) {
+                            try cur_view.visual_select();
                         } else {
                             try cur_view.select();
                         }
