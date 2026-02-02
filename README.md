@@ -148,4 +148,4 @@ You can run this test with the `run_test.sh` script at the top of the repo.
 
 ## TUI Demo
 
-https://github.com/user-attachments/assets/64593441-09e5-4096-8e98-a1d72aa9972d
+https://github.com/user-attachments/assets/57faa34b-36e7-4405-83db-68965808aad8
