@@ -59,6 +59,44 @@ pub const RegionMemoryView = struct {
         return null;
     }
 
+    fn search_and_set(self: *RegionMemoryView, buf: []const u8, search_term: []const u8, offset: usize) bool {
+        const pos_op = std.mem.indexOfPos(u8, buf, offset, search_term);
+        if (pos_op) |pos| {
+            const selection: utils.Selection = .{
+                .start = pos,
+                .end = (pos + search_term.len) - 1,
+            };
+            self.selection = selection;
+            const new_row: usize = @intFromFloat(@ceil(@as(f64, @floatFromInt(pos)) / 16.0));
+            self.position.row = new_row;
+            const new_col: usize = pos - (new_row * 16);
+            self.position.col = new_col;
+            return true;
+        }
+        return false;
+    }
+
+    /// Search for the given term.
+    pub fn search(self: *RegionMemoryView, search_term: []const u8) bool {
+        if (self.memory) |memory| {
+            if (memory.buffer) |buf| {
+                var offset: usize = 0;
+                if (self.selection) |selection| {
+                    offset = selection.end;
+                }
+                if (!self.search_and_set(buf, search_term, offset)) {
+                    if (offset != 0) {
+                        // search from beginning.
+                        return self.search_and_set(buf, search_term, 0);
+                    }
+                    return false;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// Write a mutable memory to the loaded memory.
     pub fn write(self: *RegionMemoryView, mem: plunder.mem.MutableMemory) !void {
         if (self.memory) |*memory| {
@@ -729,10 +767,19 @@ pub const MemoryView = struct {
         }
     }
 
+    /// Memory view write
     pub fn memory_write(self: *MemoryView, mem: plunder.mem.MutableMemory) !void {
         if (self.memory_loaded()) {
             try self.table.region_view.region_memory_view.write(mem);
         }
+    }
+
+    /// Memory view search
+    pub fn memory_search(self: *MemoryView, search_term: []const u8) bool {
+        if (self.memory_loaded()) {
+            return self.table.region_view.region_memory_view.search(search_term);
+        }
+        return false;
     }
 
     /// Check if a memory view is loaded.

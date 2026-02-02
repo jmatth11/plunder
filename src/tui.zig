@@ -69,7 +69,19 @@ const View = struct {
                 try self.procColumn.set_filter(filter);
                 self.search_mode = false;
             },
-            1 => {},
+            1 => {
+                if (self.memView.memory_loaded()) {
+                    const search_term = try self.search_bar.get_result();
+                    if (search_term) |term| {
+                        if (self.memView.memory_search(term)) {
+                            self.visual_mode = true;
+                        } else {
+                            try self.error_view.add("Search term could not be found.");
+                        }
+                    }
+                    // don't close search window because we could want to keep searching
+                }
+            },
             else => {},
         }
     }
@@ -264,6 +276,12 @@ const View = struct {
                 self.search_mode = true;
                 // reset search text
                 self.search_bar.len = 0;
+            },
+            1 => {
+                if (self.memView.memory_loaded()) {
+                    self.search_mode = true;
+                    self.search_bar.len = 0;
+                }
             },
             else => {},
         }
