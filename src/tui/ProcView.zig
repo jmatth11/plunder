@@ -55,7 +55,7 @@ pub const ProcView = struct {
             .borders = tui.widgets.Borders.all(),
             .border_symbols = tui.widgets.BorderSymbols.double(),
             .border_style = if (self.focused) self.theme.borderFocusedStyle() else self.theme.borderStyle(),
-            .title = " Process List - [/] search ",
+            .title = " Process List - [/] filter; [c] clear ",
         };
 
         block.render(area, buf);

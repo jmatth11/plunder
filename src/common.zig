@@ -1,13 +1,48 @@
 const std = @import("std");
 
 /// Errors related to structures in common.zig
-pub const Errors = error {
+pub const Errors = error{
     out_of_bounds,
     delimiter_not_found,
 };
 
 /// Array list of strings
 pub const StringList = std.array_list.Managed([]const u8);
+
+/// Manager for String list type.
+pub const StringListManager = struct {
+    alloc: std.mem.Allocator,
+    list: StringList,
+
+    pub fn init(alloc: std.mem.Allocator) StringListManager {
+        return .{
+            .alloc = alloc,
+            .list = .init(alloc),
+        };
+    }
+
+    pub fn create(self: *StringListManager, alloc: std.mem.Allocator) void {
+        self.alloc = alloc;
+        self.list = .init(alloc);
+    }
+
+    pub fn add(self: *StringListManager, entry: []const u8) !void {
+        try self.list.append(try self.alloc.dupe(u8, entry));
+    }
+
+    pub fn add_string_list(self: *StringListManager, list: StringList) !void {
+        for (list.items) |entry| {
+            try self.add(entry);
+        }
+    }
+
+    pub fn deinit(self: *StringListManager) void {
+        defer self.list.deinit();
+        for (self.list.items) |entry| {
+            self.alloc.free(entry);
+        }
+    }
+};
 
 /// String view structure.
 /// Holds a const reference to a string and allows to use a delimiter

@@ -3,35 +3,201 @@ const plunder = @import("plunder");
 const tui = @import("zigtui");
 const errorView = @import("ErrorView.zig");
 const utils = @import("CommonUtils.zig");
+const searchBar = @import("SearchBar.zig");
 
 /// Errors related to Memory view and subviews.
 pub const Errors = error{
     no_process_id,
     empty_region_name,
+    mismatched_memory,
+    incomplete_write,
+};
+
+/// Navigation options for cursor movement
+pub const Navigation = enum {
+    up,
+    down,
+    left,
+    right,
 };
 
 /// Structure to handle rendering the Memory within a region
 pub const RegionMemoryView = struct {
     /// main theme
     theme: tui.Theme = tui.themes.dracula,
-    /// Currently selected line
-    selected: usize = 0,
     /// Scroll offset
     scroll_offset: usize = 0,
     /// Currently loaded memory structure.
     memory: ?plunder.mem.Memory = null,
+    /// Position of the cursor.
+    position: utils.Position = .{},
+    /// Structure to manage selection region.
+    selection: ?utils.Selection = null,
+
+    pub fn get_editable_memory(self: *RegionMemoryView, alloc: std.mem.Allocator) !?plunder.mem.MutableMemory {
+        if (self.memory) |memory| {
+            if (memory.info.is_write()) {
+                if (self.selection) |selection| {
+                    var start = selection.start;
+                    var end = selection.end;
+                    if (end < start) {
+                        start = selection.end;
+                        end = selection.start;
+                    }
+                    // range is exclusive so we add 1
+                    end += 1;
+                    return try memory.to_mutable_range(alloc, start, end);
+                }
+            } else {
+                if (errorView.get_error_view()) |error_view| {
+                    try error_view.add("Memory is not writable.\n");
+                } else |err| {
+                    std.log.err("Error: {any}\n", .{err});
+                }
+            }
+        }
+        return null;
+    }
+
+    fn search_and_set(self: *RegionMemoryView, buf: []const u8, search_term: []const u8, offset: usize) bool {
+        const pos_op = std.mem.indexOfPos(u8, buf, offset, search_term);
+        if (pos_op) |pos| {
+            const selection: utils.Selection = .{
+                .start = pos,
+                .end = (pos + search_term.len) - 1,
+            };
+            self.selection = selection;
+            const new_row: usize = @intFromFloat(@ceil(@as(f64, @floatFromInt(selection.end)) / 16.0));
+            self.position.row = new_row;
+            var row_index: usize = (new_row * 16);
+            if (selection.end < row_index) {
+                row_index = ((new_row - 1) * 16);
+            }
+            const new_col: usize = selection.end - row_index;
+            self.position.col = new_col;
+            return true;
+        }
+        return false;
+    }
+
+    /// Search for the given term.
+    pub fn search(self: *RegionMemoryView, search_term: []const u8) bool {
+        if (self.memory) |memory| {
+            if (memory.buffer) |buf| {
+                var offset: usize = 0;
+                if (self.selection) |selection| {
+                    offset = selection.end;
+                }
+                if (!self.search_and_set(buf, search_term, offset)) {
+                    if (offset != 0) {
+                        // search from beginning.
+                        return self.search_and_set(buf, search_term, 0);
+                    }
+                    return false;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Write a mutable memory to the loaded memory.
+    pub fn write(self: *RegionMemoryView, mem: plunder.mem.MutableMemory) !void {
+        if (self.memory) |*memory| {
+            if (mem.info.start_addr != memory.info.start_addr) {
+                return Errors.mismatched_memory;
+            }
+            if (mem.buffer) |mut_buf| {
+                const written = try memory.*.write(mem.starting_offset, mut_buf);
+                if (written != mut_buf.len) {
+                    return Errors.incomplete_write;
+                }
+            }
+        }
+    }
 
     /// Load a new memory to render.
     pub fn load(self: *RegionMemoryView, memory: plunder.mem.Memory) void {
         // we do not deinitialize memory because we don't own it.
         self.memory = memory;
-        self.selected = 0;
         self.scroll_offset = 0;
+        self.position.row = 0;
+        self.position.col = 0;
+    }
+
+    /// Toggle the visual selection mode.
+    pub fn toggle_selection(self: *RegionMemoryView) void {
+        if (self.memory) |memory| {
+            if (memory.buffer != null) {
+                if (self.selection == null) {
+                    const starting_position = self.position_to_index();
+                    self.selection = .{
+                        .start = starting_position,
+                        .end = starting_position,
+                    };
+                } else {
+                    self.selection = null;
+                }
+            }
+        }
+    }
+
+    /// Up cursor movement
+    fn up(self: *RegionMemoryView, buf: []const u8) void {
+        if (self.position.row == 0) {
+            const line_idx = buf.len / 16;
+            self.position.row = line_idx - 1;
+        } else {
+            self.position.row -= 1;
+        }
+    }
+
+    /// Down cursor movement
+    fn down(self: *RegionMemoryView, buf: []const u8) void {
+        self.position.row += 1;
+        self.position.row = self.position.row % (buf.len / 16);
+    }
+
+    /// Cursor navigation
+    pub fn nav(self: *RegionMemoryView, dir: Navigation) void {
+        if (self.memory) |memory| {
+            if (memory.buffer) |buf| {
+                switch (dir) {
+                    .up => {
+                        self.up(buf);
+                    },
+                    .down => {
+                        self.down(buf);
+                    },
+                    .left => {
+                        if (self.position.col == 0) {
+                            self.position.col = 15;
+                            self.up(buf);
+                        } else {
+                            self.position.col -= 1;
+                        }
+                    },
+                    .right => {
+                        if (self.position.col == 15) {
+                            self.position.col = 0;
+                            self.down(buf);
+                        } else {
+                            self.position.col += 1;
+                        }
+                    },
+                }
+                // if in selection mode update the end position
+                if (self.selection) |*selection| {
+                    selection.*.end = self.position_to_index();
+                }
+            }
+        }
     }
 
     /// Unload the current memory.
     pub fn unload(self: *RegionMemoryView) void {
         self.memory = null;
+        self.selection = null;
     }
     /// Get the line length for display.
     fn get_line_len(self: *RegionMemoryView) usize {
@@ -40,62 +206,158 @@ pub const RegionMemoryView = struct {
         }
         return 0;
     }
-    /// Next selection action.
-    pub fn next_selection(self: *RegionMemoryView) void {
-        if (self.memory != null) {
-            self.selected += 1;
-            self.selected = self.selected % self.get_line_len();
-        }
+
+    /// Get the index into the memory buffer from the cursor position.
+    fn position_to_index(self: *RegionMemoryView) usize {
+        if (self.memory == null) return 0;
+        return self.position.to_index();
     }
-    /// Previous selection action.
-    pub fn prev_selection(self: *RegionMemoryView) void {
-        if (self.memory != null) {
-            if (self.selected == 0) {
-                self.selected = self.get_line_len() - 1;
-            } else {
-                self.selected -= 1;
+
+    /// Check if the given index is in the selection range.
+    fn is_selected(self: *RegionMemoryView, idx: usize) bool {
+        if (self.selection) |selection| {
+            var beg = selection.start;
+            var end = selection.end;
+            if (end < beg) {
+                beg = selection.end;
+                end = selection.start;
             }
+            return idx >= beg and idx <= end;
+        } else {
+            const position_idx = self.position_to_index();
+            return idx == position_idx;
         }
+        return false;
     }
 
     /// Render functions for memory
     pub fn render(self: *RegionMemoryView, arena: std.mem.Allocator, area: tui.Rect, buf: *tui.render.Buffer) !void {
         if (self.memory) |memory| {
+            var buffer: []const u8 = undefined;
+            if (memory.buffer == null) return;
+            buffer = memory.buffer.?;
             const height = area.y + area.height;
+            const highlight_selection: tui.Style = .{
+                .fg = .dark_gray,
+                .bg = self.theme.secondary,
+            };
             // minus 4 to account for the different level of offsets.
             // should have a better way of handling this
             const offset_height = height - 4;
             self.scroll_offset = utils.calculate_scroll_offset(
                 self.scroll_offset,
-                self.selected,
+                self.position.row,
                 offset_height,
             );
             var offset_area = area;
             offset_area.y += 1;
-            var idx: usize = self.scroll_offset;
+            var idx: usize = self.scroll_offset * 16;
             while (offset_area.y < height) : (offset_area.y += 1) {
-                const line_op = try memory.hex_dump_line(arena, idx);
-                if (line_op) |line| {
-                    if (self.selected == idx) {
-                        buf.setString(
-                            offset_area.x,
-                            offset_area.y,
-                            line,
-                            self.theme.highlightStyle(),
+                var working_offset = offset_area;
+                const base_addr: usize = memory.info.start_addr + memory.starting_offset + idx;
+                const base_addr_str = try std.fmt.allocPrint(
+                    arena,
+                    "{X:0>12}: ",
+                    .{base_addr},
+                );
+                buf.setString(
+                    working_offset.x,
+                    working_offset.y,
+                    base_addr_str,
+                    self.theme.titleStyle(),
+                );
+                working_offset.x += @intCast(base_addr_str.len);
+
+                // the hex values
+                var byte_idx: usize = 0;
+                while (byte_idx < 16) : (byte_idx += 1) {
+                    const buffer_idx = idx + byte_idx;
+                    if (buffer_idx < buffer.len) {
+                        const byte_str = try std.fmt.allocPrint(
+                            arena,
+                            "{X:0>2} ",
+                            .{buffer[buffer_idx]},
                         );
+                        if (self.is_selected(buffer_idx)) {
+                            buf.setString(
+                                working_offset.x,
+                                working_offset.y,
+                                byte_str,
+                                highlight_selection,
+                            );
+                        } else {
+                            buf.setString(
+                                working_offset.x,
+                                working_offset.y,
+                                byte_str,
+                                self.theme.textStyle(),
+                            );
+                        }
+                        working_offset.x += @intCast(byte_str.len);
                     } else {
                         buf.setString(
-                            offset_area.x,
-                            offset_area.y,
-                            line,
-                            self.theme.primaryStyle(),
+                            working_offset.x,
+                            working_offset.y,
+                            "   ",
+                            self.theme.textStyle(),
                         );
+                        working_offset.x += 3;
                     }
                 }
-                idx += 1;
+                buf.setChar(
+                    working_offset.x,
+                    working_offset.y,
+                    '|',
+                    self.theme.textStyle(),
+                );
+                working_offset.x += 1;
+
+                // The character values
+                byte_idx = 0;
+                while (byte_idx < 16) : (byte_idx += 1) {
+                    const buffer_idx = idx + byte_idx;
+                    if (buffer_idx < buffer.len) {
+                        const local_char = buffer[buffer_idx];
+                        var cur_char: u8 = '.';
+                        if (utils.is_printable(local_char)) {
+                            cur_char = buffer[buffer_idx];
+                        }
+                        if (self.is_selected(buffer_idx)) {
+                            buf.setChar(
+                                working_offset.x,
+                                working_offset.y,
+                                cur_char,
+                                highlight_selection,
+                            );
+                        } else {
+                            buf.setChar(
+                                working_offset.x,
+                                working_offset.y,
+                                cur_char,
+                                self.theme.textStyle(),
+                            );
+                        }
+                        working_offset.x += 1;
+                    } else {
+                        buf.setChar(
+                            working_offset.x,
+                            working_offset.y,
+                            ' ',
+                            self.theme.textStyle(),
+                        );
+                        working_offset.x += 1;
+                    }
+                }
+                buf.setChar(
+                    working_offset.x,
+                    working_offset.y,
+                    '|',
+                    self.theme.textStyle(),
+                );
+
+                idx += 16;
             }
         }
-        // TODO maybe think of "edit" mode to mimic model view controller style
     }
 
     /// Is memory view currently loaded with a memory.
@@ -159,9 +421,7 @@ pub const RegionView = struct {
 
     /// Next selection action
     pub fn next_selection(self: *RegionView) void {
-        if (self.region_memory_view.is_loaded()) {
-            self.region_memory_view.next_selection();
-        } else {
+        if (!self.region_memory_view.is_loaded()) {
             if (self.region != null) {
                 self.selected += 1;
                 self.selected = self.selected % self.get_region_line_len();
@@ -170,9 +430,7 @@ pub const RegionView = struct {
     }
     /// Previous selection action
     pub fn prev_selection(self: *RegionView) void {
-        if (self.region_memory_view.is_loaded()) {
-            self.region_memory_view.prev_selection();
-        } else {
+        if (!self.region_memory_view.is_loaded()) {
             if (self.region != null) {
                 if (self.selected == 0) {
                     self.selected = self.get_region_line_len() - 1;
@@ -321,14 +579,28 @@ pub const MemoryTable = struct {
     /// The region subview.
     region_view: RegionView = .{},
     /// List of region names
-    region_names: ?plunder.common.StringList = null,
+    region_names: ?plunder.common.StringListManager = null,
 
     /// Load the given list of region names.
-    pub fn load(self: *MemoryTable, list: plunder.common.StringList) void {
-        if (self.region_names) |local_list| {
-            local_list.deinit();
+    pub fn load(self: *MemoryTable, list: plunder.common.StringListManager) void {
+        if (self.region_names) |*local_list| {
+            local_list.*.deinit();
         }
         self.region_names = list;
+    }
+
+    /// Unload region table.
+    pub fn unload(self: *MemoryTable) void {
+        if (self.region_names) |*local_list| {
+            self.region_view.unload();
+            local_list.*.deinit();
+            self.region_names = null;
+        }
+    }
+
+    /// Check if this view is the current view.
+    pub fn is_viewing(self: *MemoryTable) bool {
+        return self.region_names != null and !self.region_view.is_loaded();
     }
 
     /// Next selection action.
@@ -336,9 +608,9 @@ pub const MemoryTable = struct {
         if (self.region_view.is_loaded()) {
             self.region_view.next_selection();
         } else {
-            if (self.region_names) |list| {
+            if (self.region_names) |names| {
                 self.selected += 1;
-                self.selected = self.selected % list.items.len;
+                self.selected = self.selected % names.list.items.len;
             }
         }
     }
@@ -348,9 +620,9 @@ pub const MemoryTable = struct {
         if (self.region_view.is_loaded()) {
             self.region_view.prev_selection();
         } else {
-            if (self.region_names) |list| {
+            if (self.region_names) |names| {
                 if (self.selected == 0) {
-                    self.selected = list.items.len - 1;
+                    self.selected = names.list.items.len - 1;
                 } else {
                     self.selected -= 1;
                 }
@@ -406,7 +678,6 @@ pub const MemoryTable = struct {
             // generate rows
             const rows = try self.gen_rows(arena, list);
 
-            // TODO jmatth11 replace with scroll_offset
             const offset_height = area.height - 2;
             self.scroll_offset = utils.calculate_scroll_offset(
                 self.scroll_offset,
@@ -443,19 +714,19 @@ pub const MemoryTable = struct {
 
     /// Get the selected Region's name.
     fn get_selected_name(self: *MemoryTable) []const u8 {
-        if (self.region_names) |list| {
-            return list.items[self.selected];
+        if (self.region_names) |names| {
+            return names.list.items[self.selected];
         }
         return "";
     }
 
     /// Generate rows for the table
-    fn gen_rows(self: *MemoryTable, arena: std.mem.Allocator, list: plunder.common.StringList) ![]const tui.widgets.Row {
+    fn gen_rows(self: *MemoryTable, arena: std.mem.Allocator, list_manager: plunder.common.StringListManager) ![]const tui.widgets.Row {
         var result: []tui.widgets.Row = try arena.alloc(
             tui.widgets.Row,
-            list.items.len,
+            list_manager.list.items.len,
         );
-        for (list.items, 0..) |name, idx| {
+        for (list_manager.list.items, 0..) |name, idx| {
             const cells = try arena.alloc([]const u8, 1);
             cells[0] = try arena.dupe(u8, name);
             const row: tui.widgets.Row = .{
@@ -513,13 +784,118 @@ pub const MemoryView = struct {
         }
     }
 
+    /// Unload memory view.
+    pub fn unload(self: *MemoryView) void {
+        if (self.proc != null) {
+            self.table.unload();
+            self.plun.deinit();
+            self.plun = .init(self.alloc);
+            self.proc = null;
+        }
+    }
+
+    /// Reload region names table with no filter.
+    pub fn reload_table(self: *MemoryView) !void {
+        if (self.proc != null) {
+            self.table.selected = 0;
+            const list_op = try self.plun.get_region_names(self.alloc);
+            if (list_op) |list| {
+                self.table.load(list);
+            }
+        } else {
+            return Errors.no_process_id;
+        }
+    }
+
+    /// Apply search on the region table view.
+    pub fn region_table_search(self: *MemoryView, search_term: []const u8) bool {
+        if (self.table.is_viewing()) {
+            if (self.proc != null) {
+                self.table.selected = 0;
+                const list_op = self.plun.get_region_names_from_search_term(self.alloc, search_term) catch {
+                    const error_view: ?*errorView.ErrorView = errorView.get_error_view() catch null;
+                    if (error_view) |*view| {
+                        view.*.add("Failed to fetch memory regions.\n") catch {
+                            return false;
+                        };
+                        // return true so the last error message is shown first
+                        return true;
+                    } else {
+                        return false;
+                    }
+                };
+                if (list_op) |list| {
+                    self.table.load(list);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// Memory view write
+    pub fn memory_write(self: *MemoryView, mem: plunder.mem.MutableMemory) !void {
+        if (self.memory_loaded()) {
+            try self.table.region_view.region_memory_view.write(mem);
+        }
+    }
+
+    /// Memory view search
+    pub fn memory_search(self: *MemoryView, search_term: []const u8) bool {
+        if (self.memory_loaded()) {
+            return self.table.region_view.region_memory_view.search(search_term);
+        }
+        return false;
+    }
+
+    /// Check if a memory view is loaded.
+    pub fn memory_loaded(self: *MemoryView) bool {
+        return self.table.region_view.region_memory_view.is_loaded();
+    }
+
+    /// Toggle the memory view visual selection.
+    pub fn memory_visual_selection(self: *MemoryView) void {
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.toggle_selection();
+        }
+    }
+
+    /// Toggle the memory view visual selection.
+    pub fn get_mutable_memory(self: *MemoryView) !?plunder.mem.MutableMemory {
+        if (self.memory_loaded()) {
+            return try self.table.region_view.region_memory_view.get_editable_memory(self.alloc);
+        }
+        return null;
+    }
+
+    /// Up selection action.
+    pub fn up_selection(self: *MemoryView) void {
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.nav(.up);
+        } else {
+            self.table.prev_selection();
+        }
+    }
+    /// Down selection action.
+    pub fn down_selection(self: *MemoryView) void {
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.nav(.down);
+        } else {
+            self.table.next_selection();
+        }
+    }
+
     /// Next Selection action
     pub fn next_selection(self: *MemoryView) void {
-        self.table.next_selection();
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.nav(.right);
+        }
     }
     /// Previous Selection action
     pub fn prev_selection(self: *MemoryView) void {
-        self.table.prev_selection();
+        if (self.memory_loaded()) {
+            self.table.region_view.region_memory_view.nav(.left);
+        }
     }
     /// Deselect action
     pub fn deselect(self: *MemoryView) void {
@@ -537,7 +913,12 @@ pub const MemoryView = struct {
         // the same amount of things each time
         _ = self.arena.reset(.retain_capacity);
         // conditional title
-        const title = if (self.table.region_view.is_loaded()) " Memory View - [i] toggle Info view; [b] back " else " Memory View - [i] toggle Info view ";
+        var title: []const u8 = " Memory View - [i] toggle Info view; [/] filter; [c] clear filter ";
+        if (self.memory_loaded()) {
+            title = " Memory View - [i] toggle Info view; [b] back; [v] visual select ";
+        } else if (self.table.region_view.is_loaded()) {
+            title = " Memory View - [i] toggle Info view; [b] back ";
+        }
         const block: tui.widgets.Block = .{
             .style = self.theme.baseStyle(),
             .borders = tui.widgets.Borders.all(),

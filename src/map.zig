@@ -269,15 +269,14 @@ pub const Manager = struct {
 
     /// Get the list of region names of mapped memory.
     /// User is responsible for managing the returned resources.
-    pub fn get_region_names(self: *Manager, alloc: std.mem.Allocator) !?common.StringList {
+    pub fn get_region_names(self: *Manager, alloc: std.mem.Allocator) !?common.StringListManager {
         var kit = self.collection.keyIterator();
         if (kit.len == 0) {
             return null;
         }
-        var result: common.StringList = .init(alloc);
+        var result: common.StringListManager = .init(alloc);
         while (kit.next()) |key| {
-            const key_val = try alloc.dupe(u8, key.*);
-            try result.append(key_val);
+            try result.add(key.*);
         }
         return result;
     }
