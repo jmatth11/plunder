@@ -9,6 +9,8 @@ const searchBar = @import("SearchBar.zig");
 pub const Errors = error{
     no_process_id,
     empty_region_name,
+    mismatched_memory,
+    incomplete_write,
 };
 
 /// Navigation options for cursor movement
@@ -41,9 +43,9 @@ pub const RegionMemoryView = struct {
                     if (end < start) {
                         start = selection.end;
                         end = selection.start;
-                    } else if (end == start) {
-                        end += 1;
                     }
+                    // range is exclusive so we add 1
+                    end += 1;
                     return try memory.to_mutable_range(alloc, start, end);
                 }
             } else {
@@ -57,11 +59,28 @@ pub const RegionMemoryView = struct {
         return null;
     }
 
+    /// Write a mutable memory to the loaded memory.
+    pub fn write(self: *RegionMemoryView, mem: plunder.mem.MutableMemory) !void {
+        if (self.memory) |*memory| {
+            if (mem.info.start_addr != memory.info.start_addr) {
+                return Errors.mismatched_memory;
+            }
+            if (mem.buffer) |mut_buf| {
+                const written = try memory.*.write(mem.starting_offset, mut_buf);
+                if (written != mut_buf.len) {
+                    return Errors.incomplete_write;
+                }
+            }
+        }
+    }
+
     /// Load a new memory to render.
     pub fn load(self: *RegionMemoryView, memory: plunder.mem.Memory) void {
         // we do not deinitialize memory because we don't own it.
         self.memory = memory;
         self.scroll_offset = 0;
+        self.position.row = 0;
+        self.position.col = 0;
     }
 
     /// Toggle the visual selection mode.
@@ -85,7 +104,7 @@ pub const RegionMemoryView = struct {
     fn up(self: *RegionMemoryView, buf: []const u8) void {
         if (self.position.row == 0) {
             const line_idx = buf.len / 16;
-            self.position.row = line_idx;
+            self.position.row = line_idx - 1;
         } else {
             self.position.row -= 1;
         }
@@ -136,6 +155,7 @@ pub const RegionMemoryView = struct {
     /// Unload the current memory.
     pub fn unload(self: *RegionMemoryView) void {
         self.memory = null;
+        self.selection = null;
     }
     /// Get the line length for display.
     fn get_line_len(self: *RegionMemoryView) usize {
@@ -706,6 +726,12 @@ pub const MemoryView = struct {
             }
         } else {
             return Errors.no_process_id;
+        }
+    }
+
+    pub fn memory_write(self: *MemoryView, mem: plunder.mem.MutableMemory) !void {
+        if (self.memory_loaded()) {
+            try self.table.region_view.region_memory_view.write(mem);
         }
     }
 

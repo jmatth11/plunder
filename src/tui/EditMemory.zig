@@ -40,10 +40,10 @@ pub const EditMemoryView = struct {
             memory.*.deinit();
         }
         self.memory = new_memory;
-        self.load_working_buffer();
         self.position.row = 0;
         self.position.col = 0;
         self.scroll_offset = 0;
+        self.load_working_buffer();
     }
 
     pub fn unload(self: *EditMemoryView) void {
@@ -56,17 +56,30 @@ pub const EditMemoryView = struct {
     /// Up cursor movement
     fn up(self: *EditMemoryView, buf: []const u8) void {
         if (self.position.row == 0) {
-            const line_idx = buf.len / 16;
-            self.position.row = line_idx;
+            const max_lines: usize = @intFromFloat(@ceil(@as(f64, @floatFromInt(buf.len)) / 16.0));
+            self.position.row = max_lines - 1;
         } else {
             self.position.row -= 1;
+        }
+        const end_col = self.get_end_col_position();
+        if (end_col == 0) {
+            self.position.col = 0;
+        } else if (self.position.col >= end_col) {
+            self.position.col = end_col - 1;
         }
     }
 
     /// Down cursor movement
     fn down(self: *EditMemoryView, buf: []const u8) void {
         self.position.row += 1;
-        self.position.row = self.position.row % (buf.len / 16);
+        const max_lines: usize = @intFromFloat(@ceil(@as(f64, @floatFromInt(buf.len)) / 16.0));
+        self.position.row = self.position.row % max_lines;
+        const end_col = self.get_end_col_position();
+        if (end_col == 0) {
+            self.position.col = 0;
+        } else if (self.position.col >= end_col) {
+            self.position.col = end_col - 1;
+        }
     }
 
     fn load_working_buffer(self: *EditMemoryView) void {
@@ -99,14 +112,14 @@ pub const EditMemoryView = struct {
 
     fn get_working_buffer(self: *EditMemoryView) []const u8 {
         if (self.working_buffer_len == 0) {
-            self.working_buffer[0] = 0;
-            self.working_buffer[1] = 0;
+            self.working_buffer[0] = '0';
+            self.working_buffer[1] = '0';
             self.working_buffer_len = 2;
             return self.working_buffer[0..];
         }
         if (self.working_buffer_len == 1) {
             self.working_buffer[1] = self.working_buffer[0];
-            self.working_buffer[0] = 0;
+            self.working_buffer[0] = '0';
             self.working_buffer_len = 2;
             return self.working_buffer[0..];
         }
@@ -130,7 +143,7 @@ pub const EditMemoryView = struct {
             if (std.ascii.isAlphabetic(c2)) {
                 c2 = std.ascii.toUpper(c2);
             }
-            return try std.fmt.allocPrint(arena, "{c}{c}  ", .{c, c2});
+            return try std.fmt.allocPrint(arena, "{c}{c} ", .{ c, c2 });
         }
         return try arena.dupe(u8, "   ");
     }
@@ -143,7 +156,7 @@ pub const EditMemoryView = struct {
                     var local_c: u8 = @intCast(c);
                     if (std.ascii.isHex(local_c)) {
                         // capitalize letters
-                        if (std.ascii.isAlphabetic(local_c)){
+                        if (std.ascii.isAlphabetic(local_c)) {
                             local_c = std.ascii.toUpper(local_c);
                         }
                         if (self.working_buffer_len < 2) {
@@ -194,6 +207,20 @@ pub const EditMemoryView = struct {
         }
     }
 
+    fn get_end_col_position(self: *EditMemoryView) usize {
+        if (self.memory) |memory| {
+            if (memory.buffer) |buf| {
+                const line = self.position.row * 16;
+                const ref_buf = buf[line..];
+                if (ref_buf.len >= 16) {
+                    return 16;
+                }
+                return ref_buf.len;
+            }
+        }
+        return 0;
+    }
+
     /// Cursor navigation
     pub fn nav(self: *EditMemoryView, dir: memoryView.Navigation) void {
         if (self.memory) |memory| {
@@ -208,14 +235,15 @@ pub const EditMemoryView = struct {
                     },
                     .left => {
                         if (self.position.col == 0) {
-                            self.position.col = 15;
                             self.up(buf);
+                            self.position.col = self.get_end_col_position() - 1;
                         } else {
                             self.position.col -= 1;
                         }
                     },
                     .right => {
-                        if (self.position.col == 15) {
+                        const end_position = self.get_end_col_position() - 1;
+                        if (self.position.col == end_position) {
                             self.position.col = 0;
                             self.down(buf);
                         } else {
@@ -242,11 +270,19 @@ pub const EditMemoryView = struct {
         return idx == position_idx;
     }
 
+    fn get_height(self: *EditMemoryView) u16 {
+        if (self.memory) |memory| {
+            if (memory.buffer) |buf| {
+                return @intFromFloat(@ceil(@as(f64, @floatFromInt(buf.len)) / 16.0));
+            }
+        }
+        return 0;
+    }
+
     /// Render edit memory view
     pub fn render(self: *EditMemoryView, area: tui.Rect, buf: *tui.render.Buffer) !void {
         const arena = self.arena.allocator();
         _ = self.arena.reset(.retain_capacity);
-        const height = area.height;
         var title: []const u8 = " Memory Editor (HEX Mode) ";
         if (self.entry_mode == .text) {
             title = " Memory Editor (TEXT Mode) ";
@@ -256,12 +292,39 @@ pub const EditMemoryView = struct {
             .title_style = self.theme.titleStyle(),
             .borders = .all(),
             .border_symbols = .rounded(),
-            .border_style = self.theme.borderStyle(),
+            .border_style = self.theme.borderFocusedStyle(),
             .style = self.theme.baseStyle(),
         };
         block.render(area, buf);
-        const inner_block = block.inner(area);
+        var inner_block = block.inner(area);
+        // clear screen
         buf.fillArea(inner_block, ' ', self.theme.baseStyle());
+
+        // add a little padding
+        inner_block.x += 1;
+        inner_block.width -= 1;
+
+        buf.setString(
+            inner_block.x,
+            inner_block.y,
+            "[ESC] Cancel; [Enter] Accept; [ARROW KEYS] movement; [TAB] Toggle Entry Mode",
+            self.theme.borderFocusedStyle(),
+        );
+        inner_block.y += 1;
+
+        var instructions: []const u8 = "Instructions: Use [BACKSPACE] to delete the characters, then type the desired hex number.";
+        if (self.entry_mode == .text) {
+            instructions = "Instructions: Type the key you'd like to replace the hex value with.";
+        }
+        buf.setString(
+            inner_block.x,
+            inner_block.y,
+            instructions,
+            self.theme.textStyle(),
+        );
+        inner_block.y += 1;
+        inner_block.height -= 2;
+
         if (self.memory) |memory| {
             var buffer: []const u8 = undefined;
             if (memory.buffer == null) return;
@@ -271,16 +334,17 @@ pub const EditMemoryView = struct {
                 .bg = self.theme.secondary,
             };
 
-            const offset_height = height - 4;
+            const offset_height = inner_block.height - 2;
             self.scroll_offset = utils.calculate_scroll_offset(
                 self.scroll_offset,
                 self.position.row,
                 offset_height,
             );
-            var offset_area = area;
+            var offset_area = inner_block;
+            const height_position = offset_area.y + offset_area.height;
             offset_area.y += 1;
             var idx: usize = self.scroll_offset * 16;
-            while (offset_area.y < height) : (offset_area.y += 1) {
+            while (offset_area.y < height_position and idx < buffer.len) : (offset_area.y += 1) {
                 var working_offset = offset_area;
                 const base_addr: usize = memory.info.start_addr + memory.starting_offset + idx;
                 const base_addr_str = try std.fmt.allocPrint(

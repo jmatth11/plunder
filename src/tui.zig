@@ -92,6 +92,7 @@ const View = struct {
             1 => {
                 if (!self.show_info) {
                     self.memView.deselect();
+                    self.visual_mode = false;
                 }
             },
             else => {},
@@ -123,8 +124,6 @@ const View = struct {
                     if (self.memView.get_mutable_memory()) |memory| {
                         if (memory) |mem| {
                             self.edit_memory_view.load(mem);
-                        } else {
-                            try self.error_view.add("Memory was null.\n");
                         }
                     } else |err| {
                         const msg = try std.fmt.allocPrint(
@@ -138,6 +137,24 @@ const View = struct {
                 }
             },
             else => {},
+        }
+    }
+
+    /// Write edited memory.
+    pub fn write_memory(self: *View) !void {
+        if (self.edit_memory_view.is_loaded()) {
+            if (self.edit_memory_view.memory) |*memory| {
+                self.memView.memory_write(memory.*) catch |err| {
+                    const msg = try std.fmt.allocPrint(
+                        self.alloc,
+                        "Error writing memory: {any}\n",
+                        .{err},
+                    );
+                    defer self.alloc.free(msg);
+                    try self.error_view.add(msg);
+                };
+                self.edit_memory_view.unload();
+            }
         }
     }
 
@@ -167,8 +184,6 @@ const View = struct {
             1 => {
                 if (self.edit_memory_view.is_loaded()) {
                     self.edit_memory_view.nav(.right);
-                } else if (self.show_info) {
-                    self.info_view.next_selection();
                 } else {
                     self.memView.next_selection();
                 }
@@ -183,8 +198,6 @@ const View = struct {
             1 => {
                 if (self.edit_memory_view.is_loaded()) {
                     self.edit_memory_view.nav(.left);
-                } else if (self.show_info) {
-                    self.info_view.prev_selection();
                 } else {
                     self.memView.prev_selection();
                 }
@@ -203,7 +216,9 @@ const View = struct {
             1 => {
                 if (self.edit_memory_view.is_loaded()) {
                     self.edit_memory_view.nav(.up);
-                } else if (!self.show_info) {
+                } else if (self.show_info) {
+                    self.info_view.prev_selection();
+                } else {
                     self.memView.up_selection();
                 }
             },
@@ -220,7 +235,9 @@ const View = struct {
             1 => {
                 if (self.edit_memory_view.is_loaded()) {
                     self.edit_memory_view.nav(.down);
-                } else if (!self.show_info) {
+                } else if (self.show_info) {
+                    self.info_view.next_selection();
+                } else {
                     self.memView.down_selection();
                 }
             },
@@ -267,6 +284,7 @@ const View = struct {
             if (c == 'b') self.deselect();
             if (c == 'i') {
                 self.show_info = !self.show_info;
+                self.visual_mode = false;
             }
             if (c == '/') self.toggle_search_mode();
             if (c == 'v') self.visual_selection();
@@ -354,8 +372,7 @@ pub fn main() !void {
                     },
                     .enter => {
                         if (cur_view.edit_memory_view.is_loaded()) {
-                            // TODO implement taking the edited memory and
-                            // writing it out. Update the original buffer too.
+                            try cur_view.write_memory();
                         } else if (cur_view.visual_mode) {
                             try cur_view.visual_select();
                         } else if (cur_view.search_mode) {
@@ -453,8 +470,8 @@ pub fn main() !void {
                     const edit_memory_area: tui.Rect = .{
                         .x = start_x,
                         .y = start_y,
-                        .width = area.width - start_x,
-                        .height = area.height - start_y,
+                        .width = area.width - (start_x * 2),
+                        .height = area.height - (start_y * 2),
                     };
                     try view.edit_memory_view.render(edit_memory_area, buf);
                 }
@@ -475,6 +492,7 @@ pub fn main() !void {
                     top_right_area.height = 6;
                     error_block.render(top_right_area, buf);
                     const inner_error_block = error_block.inner(top_right_area);
+                    buf.fillArea(inner_error_block, ' ', theme.baseStyle());
                     const err_paragraph: tui.widgets.Paragraph = .{
                         .text = err_msg,
                         .style = theme.errorStyle(),
