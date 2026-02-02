@@ -169,7 +169,9 @@ pub const EditMemoryView = struct {
                     } else {
                         try error_view.add("Must be a hex number: 0-9, A-F.");
                     }
-                } else {}
+                } else {
+                    try error_view.add("Must be a hex number: 0-9, A-F.");
+                }
             },
             .text => {
                 const max_value = std.math.maxInt(u8);

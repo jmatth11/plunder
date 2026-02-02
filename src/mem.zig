@@ -39,6 +39,14 @@ pub const MutableMemory = struct {
         return result;
     }
 
+    /// Check if text exists in buffer.
+    pub fn text_exists(self: *const MutableMemory, text: []const u8) bool {
+        if (self.buffer) |buf| {
+            return std.mem.indexOf(u8, buf, text) != null;
+        }
+        return false;
+    }
+
     /// Deinitialize.
     pub fn deinit(self: *MutableMemory) void {
         self.info.deinit();
@@ -232,6 +240,14 @@ pub const Memory = struct {
         }
     }
 
+    /// Check if text exists in buffer.
+    pub fn text_exists(self: *const Memory, text: []const u8) bool {
+        if (self.buffer) |buf| {
+            return std.mem.indexOf(u8, buf, text) != null;
+        }
+        return false;
+    }
+
     /// Deinitialize.
     pub fn deinit(self: *Memory) void {
         self.info.deinit();
@@ -310,6 +326,16 @@ pub const Region = struct {
         return result;
     }
 
+    /// Check if text exists within this region.
+    pub fn text_exists(self: *const Region, text: []const u8) bool {
+        for (self.memory.items) |memory| {
+            if (memory.text_exists(text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// Deinitialize.
     pub fn deinit(self: *Region) void {
         self.gpa.deinit();
@@ -326,6 +352,7 @@ pub const Plunder = struct {
     pid: ?usize = null,
     mem_filename: []const u8 = undefined,
     map_manager: map.Manager = undefined,
+    pool: ?*std.Thread.Pool = null,
 
     /// Initialize Plunder structure.
     pub fn init(alloc: std.mem.Allocator) Plunder {
@@ -340,6 +367,10 @@ pub const Plunder = struct {
     pub fn load(self: *Plunder, pid: usize) !void {
         self.clear_pid();
         errdefer self.clear_pid();
+        if (self.pool == null) {
+            self.pool = try self.alloc.create(std.Thread.Pool);
+            try self.pool.?.init(.{.allocator = self.alloc });
+        }
         self.mem_filename = try std.fmt.allocPrint(
             self.alloc,
             MEM_FILE,
@@ -351,11 +382,93 @@ pub const Plunder = struct {
 
     /// Get the list of region names.
     /// If a process has not been loaded, null is returned.
-    pub fn get_region_names(self: *Plunder, alloc: std.mem.Allocator) !?common.StringList {
+    pub fn get_region_names(self: *Plunder, alloc: std.mem.Allocator) !?common.StringListManager {
         if (self.pid == null) {
             return null;
         }
         return self.map_manager.get_region_names(alloc);
+    }
+
+    /// Get region names that contain the given search term.
+    pub fn get_region_names_from_search_term(self: *Plunder, alloc: std.mem.Allocator, search_term: []const u8) !?common.StringListManager {
+        if (self.pid == null) {
+            return null;
+        }
+        var all_names = try self.map_manager.get_region_names(alloc);
+        if (all_names == null) return null;
+        defer all_names.?.deinit();
+        var result: common.StringListManager = .init(alloc);
+        errdefer result.deinit();
+        const limit: usize = 10;
+        if (all_names) |names| {
+            if (names.list.items.len < limit or self.pool == null) {
+                for (names.list.items) |name| {
+                    const region_op = self.get_region_data(name) catch |err| {
+                        if (err == error.InputOutput) {
+                            continue;
+                        }
+                        return err;
+                    };
+                    if (region_op) |region| {
+                        if (region.text_exists(search_term)) {
+                            try result.add(name);
+                        }
+                    }
+                }
+            } else {
+                var idx: usize = 0;
+                var pool = self.pool.?;
+                // setup threads and thread results
+                var thread_results: std.array_list.Managed(*common.StringListManager) = .init(self.alloc);
+                defer thread_results.deinit();
+
+                // kick off threads and their associated data
+                const incr: usize = limit / 2;
+                var wg: std.Thread.WaitGroup = .{};
+                while (idx < names.list.items.len) : (idx += incr) {
+                    var end_pos: usize = idx + incr;
+                    if (end_pos > names.list.items.len) {
+                        end_pos = names.list.items.len;
+                    }
+                    var list: *common.StringListManager = try self.alloc.create(common.StringListManager);
+                    list.create(self.alloc);
+                    const range: []const []const u8 = names.list.items[idx..end_pos];
+                    pool.spawnWg(&wg, Plunder.region_data_from_list, .{ self, range, search_term, list });
+                    try thread_results.append(list);
+                }
+                // execute
+                pool.waitAndWork(&wg);
+                // grab results from threads
+                for (thread_results.items) |*thr_result| {
+                    try result.add_string_list(thr_result.*.list);
+                    thr_result.*.deinit();
+                    self.alloc.destroy(thr_result.*);
+                }
+            }
+        }
+        if (result.list.items.len == 0) {
+            return null;
+        }
+        return result;
+    }
+
+    fn region_data_from_list(self: *Plunder, regions: []const []const u8, search_term: []const u8, list_manager: *common.StringListManager) void {
+        for (regions) |name| {
+            const region_op = self.get_region_data(name) catch |err| {
+                if (err == error.InputOutput) {
+                    continue;
+                }
+                std.log.err("region_data_from_list get region data error: {any}\n", .{err});
+                return;
+            };
+            if (region_op) |region| {
+                if (region.text_exists(search_term)) {
+                    list_manager.*.add(name) catch |err| {
+                        std.log.err("region_data_from_list list add error: {any}\n", .{err});
+                    };
+                }
+            }
+        }
     }
 
     /// Get the data for a given region.
@@ -380,6 +493,9 @@ pub const Plunder = struct {
     pub fn deinit(self: *Plunder) void {
         self.clear_pid();
         self.map_manager.deinit();
+        if (self.pool) |*pool| {
+            pool.*.deinit();
+        }
     }
 
     fn clear_pid(self: *Plunder) void {

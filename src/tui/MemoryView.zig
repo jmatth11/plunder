@@ -67,9 +67,13 @@ pub const RegionMemoryView = struct {
                 .end = (pos + search_term.len) - 1,
             };
             self.selection = selection;
-            const new_row: usize = @intFromFloat(@ceil(@as(f64, @floatFromInt(pos)) / 16.0));
+            const new_row: usize = @intFromFloat(@ceil(@as(f64, @floatFromInt(selection.end)) / 16.0));
             self.position.row = new_row;
-            const new_col: usize = pos - (new_row * 16);
+            var row_index: usize = (new_row * 16);
+            if (selection.end < row_index) {
+                row_index = ((new_row - 1) * 16);
+            }
+            const new_col: usize = selection.end - row_index;
             self.position.col = new_col;
             return true;
         }
@@ -575,14 +579,28 @@ pub const MemoryTable = struct {
     /// The region subview.
     region_view: RegionView = .{},
     /// List of region names
-    region_names: ?plunder.common.StringList = null,
+    region_names: ?plunder.common.StringListManager = null,
 
     /// Load the given list of region names.
-    pub fn load(self: *MemoryTable, list: plunder.common.StringList) void {
-        if (self.region_names) |local_list| {
-            local_list.deinit();
+    pub fn load(self: *MemoryTable, list: plunder.common.StringListManager) void {
+        if (self.region_names) |*local_list| {
+            local_list.*.deinit();
         }
         self.region_names = list;
+    }
+
+    /// Unload region table.
+    pub fn unload(self: *MemoryTable) void {
+        if (self.region_names) |*local_list| {
+            self.region_view.unload();
+            local_list.*.deinit();
+            self.region_names = null;
+        }
+    }
+
+    /// Check if this view is the current view.
+    pub fn is_viewing(self: *MemoryTable) bool {
+        return self.region_names != null and !self.region_view.is_loaded();
     }
 
     /// Next selection action.
@@ -590,9 +608,9 @@ pub const MemoryTable = struct {
         if (self.region_view.is_loaded()) {
             self.region_view.next_selection();
         } else {
-            if (self.region_names) |list| {
+            if (self.region_names) |names| {
                 self.selected += 1;
-                self.selected = self.selected % list.items.len;
+                self.selected = self.selected % names.list.items.len;
             }
         }
     }
@@ -602,9 +620,9 @@ pub const MemoryTable = struct {
         if (self.region_view.is_loaded()) {
             self.region_view.prev_selection();
         } else {
-            if (self.region_names) |list| {
+            if (self.region_names) |names| {
                 if (self.selected == 0) {
-                    self.selected = list.items.len - 1;
+                    self.selected = names.list.items.len - 1;
                 } else {
                     self.selected -= 1;
                 }
@@ -660,7 +678,6 @@ pub const MemoryTable = struct {
             // generate rows
             const rows = try self.gen_rows(arena, list);
 
-            // TODO jmatth11 replace with scroll_offset
             const offset_height = area.height - 2;
             self.scroll_offset = utils.calculate_scroll_offset(
                 self.scroll_offset,
@@ -697,19 +714,19 @@ pub const MemoryTable = struct {
 
     /// Get the selected Region's name.
     fn get_selected_name(self: *MemoryTable) []const u8 {
-        if (self.region_names) |list| {
-            return list.items[self.selected];
+        if (self.region_names) |names| {
+            return names.list.items[self.selected];
         }
         return "";
     }
 
     /// Generate rows for the table
-    fn gen_rows(self: *MemoryTable, arena: std.mem.Allocator, list: plunder.common.StringList) ![]const tui.widgets.Row {
+    fn gen_rows(self: *MemoryTable, arena: std.mem.Allocator, list_manager: plunder.common.StringListManager) ![]const tui.widgets.Row {
         var result: []tui.widgets.Row = try arena.alloc(
             tui.widgets.Row,
-            list.items.len,
+            list_manager.list.items.len,
         );
-        for (list.items, 0..) |name, idx| {
+        for (list_manager.list.items, 0..) |name, idx| {
             const cells = try arena.alloc([]const u8, 1);
             cells[0] = try arena.dupe(u8, name);
             const row: tui.widgets.Row = .{
@@ -765,6 +782,55 @@ pub const MemoryView = struct {
         } else {
             return Errors.no_process_id;
         }
+    }
+
+    /// Unload memory view.
+    pub fn unload(self: *MemoryView) void {
+        if (self.proc != null) {
+            self.table.unload();
+            self.plun.deinit();
+            self.plun = .init(self.alloc);
+            self.proc = null;
+        }
+    }
+
+    /// Reload region names table with no filter.
+    pub fn reload_table(self: *MemoryView) !void {
+        if (self.proc != null) {
+            self.table.selected = 0;
+            const list_op = try self.plun.get_region_names(self.alloc);
+            if (list_op) |list| {
+                self.table.load(list);
+            }
+        } else {
+            return Errors.no_process_id;
+        }
+    }
+
+    /// Apply search on the region table view.
+    pub fn region_table_search(self: *MemoryView, search_term: []const u8) bool {
+        if (self.table.is_viewing()) {
+            if (self.proc != null) {
+                self.table.selected = 0;
+                const list_op = self.plun.get_region_names_from_search_term(self.alloc, search_term) catch {
+                    const error_view: ?*errorView.ErrorView = errorView.get_error_view() catch null;
+                    if (error_view) |*view| {
+                        view.*.add("Failed to fetch memory regions.\n") catch {
+                            return false;
+                        };
+                        // return true so the last error message is shown first
+                        return true;
+                    } else {
+                        return false;
+                    }
+                };
+                if (list_op) |list| {
+                    self.table.load(list);
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /// Memory view write
@@ -847,7 +913,7 @@ pub const MemoryView = struct {
         // the same amount of things each time
         _ = self.arena.reset(.retain_capacity);
         // conditional title
-        var title: []const u8 = " Memory View - [i] toggle Info view ";
+        var title: []const u8 = " Memory View - [i] toggle Info view; [/] filter; [c] clear filter ";
         if (self.memory_loaded()) {
             title = " Memory View - [i] toggle Info view; [b] back; [v] visual select ";
         } else if (self.table.region_view.is_loaded()) {

@@ -16,7 +16,7 @@ pub const InfoView = struct {
     /// Arena allocator
     arena: std.heap.ArenaAllocator,
     /// Info string list
-    info_str: plunder.common.StringList,
+    info_str: plunder.common.StringListManager,
     /// The currently loaded process.
     proc: ?plunder.proc.ProcInfo = null,
     /// The line selected.
@@ -45,6 +45,8 @@ pub const InfoView = struct {
     pub fn deinit(self: *InfoView) void {
         self.unload();
         self.arena.deinit();
+        // we deinit manually since we are using an arena for all the internal strings.
+        self.info_str.list.deinit();
     }
 
     /// Render info view
@@ -69,8 +71,8 @@ pub const InfoView = struct {
             );
             var index: usize = self.scroll_offset;
             const actual_height = inner_block.y + inner_block.height;
-            while (index < self.info_str.items.len and inner_block.y < actual_height) : (index += 1) {
-                const line = self.info_str.items[index];
+            while (index < self.info_str.list.items.len and inner_block.y < actual_height) : (index += 1) {
+                const line = self.info_str.list.items[index];
                 if (index == self.selected) {
                     buf.setString(
                         inner_block.x,
@@ -123,7 +125,7 @@ pub const InfoView = struct {
             self.alloc.free(udp_list);
             self.udp_list = null;
         }
-        self.info_str.clearAndFree();
+        self.info_str.list.clearAndFree();
         _ = self.arena.reset(.free_all);
     }
 
@@ -131,14 +133,14 @@ pub const InfoView = struct {
     pub fn next_selection(self: *InfoView) void {
         if (self.proc != null) {
             self.selected += 1;
-            self.selected = self.selected % self.info_str.items.len;
+            self.selected = self.selected % self.info_str.list.items.len;
         }
     }
     /// Previous selection action.
     pub fn prev_selection(self: *InfoView) void {
         if (self.proc != null) {
             if (self.selected == 0) {
-                self.selected = self.info_str.items.len - 1;
+                self.selected = self.info_str.list.items.len - 1;
             } else {
                 self.selected -= 1;
             }
@@ -149,8 +151,8 @@ pub const InfoView = struct {
     fn generate_info_str(self: *InfoView, arena: std.mem.Allocator) !void {
         if (self.proc) |proc| {
             const command = try std.fmt.allocPrint(arena, "Command: {s}", .{proc.command});
-            try self.info_str.append(command);
-            try self.info_str.append("Command Line Args:");
+            try self.info_str.list.append(command);
+            try self.info_str.list.append("Command Line Args:");
             var index: usize = 0;
             while (index < proc.command_line.len) : (index += 1) {
                 const view = try proc.command_line.at(index);
@@ -160,10 +162,10 @@ pub const InfoView = struct {
                     "- \"{s}\"",
                     .{view},
                 );
-                try self.info_str.append(arg);
+                try self.info_str.list.append(arg);
             }
-            try self.info_str.append(" ");
-            try self.info_str.append("Environment Variables:");
+            try self.info_str.list.append(" ");
+            try self.info_str.list.append("Environment Variables:");
             index = 0;
             while (index < proc.environment_vars.len) : (index += 1) {
                 const view = try proc.environment_vars.at(index);
@@ -173,42 +175,42 @@ pub const InfoView = struct {
                     "- \"{s}\"",
                     .{view},
                 );
-                try self.info_str.append(arg);
+                try self.info_str.list.append(arg);
             }
-            try self.info_str.append(" ");
-            try self.info_str.append("------------------------------------");
+            try self.info_str.list.append(" ");
+            try self.info_str.list.append("------------------------------------");
             var buffer: [1024]u8 = undefined;
             var show_end_line: bool = false;
             if (self.tcp_list) |tcp_list| {
                 if (tcp_list.len > 0) {
                     show_end_line = true;
-                    try self.info_str.append(" ");
-                    try self.info_str.append("TCP Connections");
-                    try self.info_str.append("Type | State | Local Addr | Remote Addr | inode | Kernel Slot");
+                    try self.info_str.list.append(" ");
+                    try self.info_str.list.append("TCP Connections");
+                    try self.info_str.list.append("Type | State | Local Addr | Remote Addr | inode | Kernel Slot");
                     for (tcp_list) |tcp| {
                         var writer: std.io.Writer = .fixed(&buffer);
                         try tcp.format(&writer, false);
                         const line = try arena.dupe(u8, writer.buffer[0..writer.end]);
-                        try self.info_str.append(line);
+                        try self.info_str.list.append(line);
                     }
                 }
             }
             if (self.udp_list) |udp_list| {
                 if (udp_list.len > 0) {
                     show_end_line = true;
-                    try self.info_str.append(" ");
-                    try self.info_str.append("UDP Connections");
-                    try self.info_str.append("Type | State | Local Addr | Remote Addr | inode | Kernel Slot");
+                    try self.info_str.list.append(" ");
+                    try self.info_str.list.append("UDP Connections");
+                    try self.info_str.list.append("Type | State | Local Addr | Remote Addr | inode | Kernel Slot");
                     for (udp_list) |udp| {
                         var writer: std.io.Writer = .fixed(&buffer);
                         try udp.format(&writer, false);
                         const line = try arena.dupe(u8, writer.buffer[0..writer.end]);
-                        try self.info_str.append(line);
+                        try self.info_str.list.append(line);
                     }
                 }
             }
             if (show_end_line) {
-                try self.info_str.append("------------------------------------");
+                try self.info_str.list.append("------------------------------------");
             }
         }
     }

@@ -80,6 +80,17 @@ const View = struct {
                         }
                     }
                     // don't close search window because we could want to keep searching
+                } else if (self.memView.table.is_viewing()) {
+                    const search_term = try self.search_bar.get_result();
+                    if (search_term) |term| {
+                        if (self.memView.region_table_search(term)) {
+                            self.search_mode = false;
+                        } else {
+                            try self.error_view.add("Search term could not be found.");
+                        }
+                    } else {
+                        try self.memView.reload_table();
+                    }
                 }
             },
             else => {},
@@ -92,7 +103,11 @@ const View = struct {
             0 => {
                 try self.procColumn.set_filter(null);
             },
-            1 => {},
+            1 => {
+                if (self.memView.table.is_viewing()) {
+                    try self.memView.reload_table();
+                }
+        },
             else => {},
         }
     }
@@ -122,7 +137,14 @@ const View = struct {
             },
             1 => {
                 if (!self.show_info) {
-                    try self.memView.select();
+                    self.memView.select() catch |err| {
+                        if (err == error.FileNotFound) {
+                            self.memView.unload();
+                            try self.error_view.add("Process seems to no longer exist\n");
+                            return;
+                        }
+                        return err;
+                    };
                 }
             },
             else => {},
@@ -271,28 +293,31 @@ const View = struct {
     }
 
     pub fn toggle_search_mode(self: *View) void {
+        var toggle: bool = false;
         switch (self.focus) {
             0 => {
-                self.search_mode = true;
-                // reset search text
-                self.search_bar.len = 0;
+                toggle = true;
             },
             1 => {
-                if (self.memView.memory_loaded()) {
-                    self.search_mode = true;
-                    self.search_bar.len = 0;
+                if (self.memView.memory_loaded() or self.memView.table.is_viewing()) {
+                    toggle = true;
                 }
             },
             else => {},
         }
+        if (toggle) {
+            self.search_mode = true;
+            // reset search text
+            self.search_bar.len = 0;
+        }
     }
 
     /// Key handler
-    pub fn key_handler(self: *View, c: u21) void {
+    pub fn key_handler(self: *View, c: u21) !void {
         if (self.search_mode) {
             self.search_bar.add(c);
         } else if (self.edit_memory_view.is_loaded()) {
-            self.edit_memory_view.add_character(c) catch {};
+            try self.edit_memory_view.add_character(c);
         } else {
             if (c == 'q' or c == 'Q') self.running = false;
             if (c == 'j') self.down_selection();
@@ -300,6 +325,7 @@ const View = struct {
             if (c == 'h') self.prev_selection();
             if (c == 'l') self.next_selection();
             if (c == 'b') self.deselect();
+            if (c == 'c') try self.clear_filter();
             if (c == 'i') {
                 self.show_info = !self.show_info;
                 self.visual_mode = false;
@@ -348,7 +374,7 @@ pub fn main() !void {
             .key => |key| {
                 switch (key.code) {
                     .char => |c| {
-                        cur_view.key_handler(c);
+                        try cur_view.key_handler(c);
                     },
                     .backspace => {
                         if (cur_view.search_mode) {
