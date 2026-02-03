@@ -1,16 +1,18 @@
 # Plunder
 
+![Plunder Edit View](./references/pictures/edit-view.png)
+
 Contents:
-- [Build](#build)
-    - [TUI](#tui)
-    - [Library](#library)
+- [TUI Demo](#tui-demo)
 - [Functionality](#functionality)
     - [Library Features](#library-features)
     - [TUI Features](#tui-features)
+- [Build](#build)
+    - [TUI](#tui)
+    - [Library](#library)
 - [Example](#example)
 - [Docs](#docs)
 - [Testing](#testing)
-- [TUI Demo](#tui-demo)
 
 > [!WARNING]
 > This library is still in the early stages and the API may change.
@@ -18,6 +20,10 @@ Contents:
 Plunder allows you read/write memory from a running process on linux and grab basic network information.
 
 This repo is a library and a TUI.
+
+## TUI Demo
+
+https://github.com/user-attachments/assets/57faa34b-36e7-4405-83db-68965808aad8
 
 ## Functionality
 
@@ -163,6 +169,3 @@ the test text that is allocated in the `dummy.c` file.
 You can run this test with the `run_test.sh` script at the top of the repo.
 
 
-## TUI Demo
-
-https://github.com/user-attachments/assets/57faa34b-36e7-4405-83db-68965808aad8
