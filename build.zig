@@ -52,7 +52,67 @@ fn build_c_exe(
     b.installArtifact(exe);
 }
 
-pub fn build(b: *std.Build) void {
+pub fn release_builds(b: *std.Build) !void {
+    const targets: []const std.Target.Query = &.{
+        .{
+            .cpu_arch = .x86_64,
+            .os_tag = .linux,
+        },
+        .{
+            .cpu_arch = .aarch64,
+            .os_tag = .linux,
+        },
+        .{
+            .cpu_arch = .aarch64,
+            .os_tag = .macos,
+        },
+    };
+    var alloc = std.heap.smp_allocator;
+    for (targets) |t| {
+        const resolve = b.resolveTargetQuery(t);
+        // create plunder module
+        const mod = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = resolve,
+            .optimize = .ReleaseSafe,
+        });
+
+        // create executable
+        const exe_version = try resolve.result.linuxTriple(alloc);
+        defer alloc.free(exe_version);
+        const exe_name = try std.fmt.allocPrint(
+            alloc,
+            "plunder-{s}",
+            .{exe_version},
+        );
+        defer alloc.free(exe_name);
+        const zigtui_dep = b.dependency("zigtui", .{
+            .target = resolve,
+            .optimize = .ReleaseSafe,
+        });
+        const tui = b.addExecutable(.{
+            .name = exe_name,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/tui.zig"),
+                .target = resolve,
+                .optimize = .ReleaseSafe,
+                .imports = &.{
+                    .{ .name = "plunder", .module = mod },
+                    .{ .name = "zigtui", .module = zigtui_dep.module("zigtui") },
+                },
+            }),
+        });
+        b.installArtifact(tui);
+    }
+}
+
+pub fn build(b: *std.Build) !void {
+    const build_release = b.option(bool, "release", "Build release builds for all supported platforms.") orelse false;
+    if (build_release) {
+        try release_builds(b);
+        return;
+    }
+
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
