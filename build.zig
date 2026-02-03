@@ -142,6 +142,18 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    const lib = b.addLibrary(.{
+        .name = "plunder-lib",
+        .root_module = mod,
+    });
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = lib.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+
+    const doc_step = b.step("docs", "Generate docs");
+    doc_step.dependOn(&install_docs.step);
 
     // create executable
     const example_exe = b.addExecutable(.{

@@ -8,6 +8,7 @@ Contents:
     - [Library Features](#library-features)
     - [TUI Features](#tui-features)
 - [Example](#example)
+- [Docs](#docs)
 - [Testing](#testing)
 - [TUI Demo](#tui-demo)
 
@@ -134,6 +135,22 @@ pub fn main() !void {
 ```
 
 You can also look at `test/heap_read.zig` to see an example of overwriting memory.
+
+## Docs
+
+To view the docs for the repo you need to generate them with this command:
+```bash
+zig build docs
+```
+
+This will generate the docs in `zig-out/docs`.
+Next serve this director to view them. The easiest way is with python or python3.
+
+```bash
+python3 -m http.server 8000 -d zig-out/docs/
+```
+
+Navigate to `http://localhost:8000`. Now you can navigate the docs.
 
 ## Testing
 
