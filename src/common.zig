@@ -14,6 +14,7 @@ pub const StringListManager = struct {
     alloc: std.mem.Allocator,
     list: StringList,
 
+    /// Initialize
     pub fn init(alloc: std.mem.Allocator) StringListManager {
         return .{
             .alloc = alloc,
@@ -21,21 +22,27 @@ pub const StringListManager = struct {
         };
     }
 
+    /// Method to initialize an already allocated StringListManager.
     pub fn create(self: *StringListManager, alloc: std.mem.Allocator) void {
         self.alloc = alloc;
         self.list = .init(alloc);
     }
 
+    /// Add and entry to the string list manager.
+    /// This method copies the string.
     pub fn add(self: *StringListManager, entry: []const u8) !void {
         try self.list.append(try self.alloc.dupe(u8, entry));
     }
 
+    /// Add all strings from the given StringList.
+    /// This method copies all incoming strings.
     pub fn add_string_list(self: *StringListManager, list: StringList) !void {
         for (list.items) |entry| {
             try self.add(entry);
         }
     }
 
+    /// Cleanup and free internals.
     pub fn deinit(self: *StringListManager) void {
         defer self.list.deinit();
         for (self.list.items) |entry| {

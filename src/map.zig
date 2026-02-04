@@ -10,6 +10,7 @@ const MAP_FILE: []const u8 = "/proc/{}/maps";
 pub const Errors = error{
     /// Permissions are malformed
     malformed_permissions,
+    /// Missing process ID.
     missing_pid,
 };
 
@@ -65,6 +66,7 @@ pub const Info = struct {
         return result;
     }
 
+    /// Create a deep copy of this Info structure.
     pub fn dupe(self: *const Info, alloc: std.mem.Allocator) !Info {
         var local_pathname: ?[]const u8 = null;
         if (self.pathname) |name| {
@@ -293,6 +295,7 @@ pub const Manager = struct {
         self.collection.deinit();
     }
 
+    /// Add info entry.
     fn add_entry(self: *Manager, info: *Info) !void {
         if (self.pid) |pid| {
             info.*.pid = pid;
@@ -316,6 +319,7 @@ pub const Manager = struct {
         }
     }
 
+    /// Clear the process ID.
     fn clear_pid(self: *Manager) void {
         if (self.pid != null) {
             self.alloc.free(self.map_filename);
@@ -323,6 +327,7 @@ pub const Manager = struct {
         }
     }
 
+    /// Clear the collection.
     fn clear_collection(self: *Manager) void {
         var vit = self.collection.valueIterator();
         while (vit.next()) |value| {

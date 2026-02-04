@@ -12,6 +12,8 @@ pub const Errors = error{
     not_writable,
 };
 
+/// MutableMemory structure.
+/// Holds the memory buffer from a Region.
 pub const MutableMemory = struct {
     alloc: std.mem.Allocator = undefined,
     /// Mapped info data.

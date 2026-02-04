@@ -23,11 +23,14 @@ pub const EditMemoryView = struct {
     entry_mode: EntryMode = .hex,
     /// Position of the cursor.
     position: utils.Position = .{},
+    /// Scroll offset.
     scroll_offset: usize = 0,
     /// The working buffer.
     working_buffer: [2]u8 = @splat(0),
+    /// Working buffer length.
     working_buffer_len: usize = 0,
 
+    /// Initialize
     pub fn init(alloc: std.mem.Allocator) EditMemoryView {
         return .{
             .alloc = alloc,
@@ -35,6 +38,7 @@ pub const EditMemoryView = struct {
         };
     }
 
+    /// Load the mutable memory to use for editing.
     pub fn load(self: *EditMemoryView, new_memory: plunder.mem.MutableMemory) void {
         if (self.memory) |*memory| {
             memory.*.deinit();
@@ -46,6 +50,7 @@ pub const EditMemoryView = struct {
         self.load_working_buffer();
     }
 
+    /// Unload the mutable memory.
     pub fn unload(self: *EditMemoryView) void {
         if (self.memory) |*memory| {
             memory.*.deinit();
@@ -82,6 +87,7 @@ pub const EditMemoryView = struct {
         }
     }
 
+    /// Load the working buffer with the value under the cursor.
     fn load_working_buffer(self: *EditMemoryView) void {
         if (self.memory) |memory| {
             if (memory.buffer) |buf| {
@@ -95,6 +101,7 @@ pub const EditMemoryView = struct {
             }
         }
     }
+    /// Write the working buffer content to the mutable memory buffer.
     fn write_working_buffer(self: *EditMemoryView) void {
         if (self.memory) |memory| {
             if (memory.buffer) |buf| {
@@ -110,6 +117,8 @@ pub const EditMemoryView = struct {
         }
     }
 
+    /// Get the working buffer normalized.
+    /// This function will pad zeros if the whole array is not filled.
     fn get_working_buffer(self: *EditMemoryView) []const u8 {
         if (self.working_buffer_len == 0) {
             self.working_buffer[0] = '0';
@@ -126,6 +135,7 @@ pub const EditMemoryView = struct {
         return self.working_buffer[0..];
     }
 
+    /// Print the working buffer correctly to the screen.
     fn print_working_buffer(self: *EditMemoryView, arena: std.mem.Allocator) ![]const u8 {
         if (self.working_buffer_len == 1) {
             var c = self.working_buffer[0];
@@ -148,6 +158,7 @@ pub const EditMemoryView = struct {
         return try arena.dupe(u8, "   ");
     }
 
+    /// Add character to the working buffer.
     pub fn add_character(self: *EditMemoryView, c: u21) !void {
         var error_view = try errorView.get_error_view();
         switch (self.entry_mode) {
@@ -187,6 +198,7 @@ pub const EditMemoryView = struct {
         }
     }
 
+    /// Delete character from the working buffer.
     pub fn delete_character(self: *EditMemoryView) void {
         var clear: bool = false;
         switch (self.entry_mode) {
@@ -209,6 +221,7 @@ pub const EditMemoryView = struct {
         }
     }
 
+    /// Get the end column position based on the current row position.
     fn get_end_col_position(self: *EditMemoryView) usize {
         if (self.memory) |memory| {
             if (memory.buffer) |buf| {
@@ -272,6 +285,7 @@ pub const EditMemoryView = struct {
         return idx == position_idx;
     }
 
+    /// Get the height of the buffer if printed to the screen.
     fn get_height(self: *EditMemoryView) u16 {
         if (self.memory) |memory| {
             if (memory.buffer) |buf| {
@@ -314,7 +328,7 @@ pub const EditMemoryView = struct {
         );
         inner_block.y += 1;
 
-        var instructions: []const u8 = "Instructions: Use [BACKSPACE] to delete the characters, then type the desired hex number.";
+        var instructions: []const u8 = "Instructions: [BACKSPACE] to delete the characters, then type the hex number.";
         if (self.entry_mode == .text) {
             instructions = "Instructions: Type the key you'd like to replace the hex value with.";
         }
@@ -468,6 +482,7 @@ pub const EditMemoryView = struct {
         return self.memory != null;
     }
 
+    /// Cleanup
     pub fn deinit(self: *EditMemoryView) void {
         self.arena.deinit();
         if (self.memory) |*memory| {

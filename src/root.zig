@@ -1,6 +1,6 @@
 /// namespace for memory mapping info for a given process.
 pub const map = @import("map.zig");
-/// namespace for reading memory from the given mapping info and process.
+/// namespace for reading/writing memory from the given mapping info and process.
 pub const mem = @import("mem.zig");
 /// namespace for network info.
 pub const network = @import("network.zig");

@@ -34,6 +34,7 @@ pub const RegionMemoryView = struct {
     /// Structure to manage selection region.
     selection: ?utils.Selection = null,
 
+    /// Get the editable memory copy of this region memory.
     pub fn get_editable_memory(self: *RegionMemoryView, alloc: std.mem.Allocator) !?plunder.mem.MutableMemory {
         if (self.memory) |memory| {
             if (memory.info.is_write()) {
@@ -59,6 +60,7 @@ pub const RegionMemoryView = struct {
         return null;
     }
 
+    /// Search for a given search term and set the selection around it.
     fn search_and_set(self: *RegionMemoryView, buf: []const u8, search_term: []const u8, offset: usize) bool {
         const pos_op = std.mem.indexOfPos(u8, buf, offset, search_term);
         if (pos_op) |pos| {
