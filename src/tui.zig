@@ -292,6 +292,7 @@ const View = struct {
         }
     }
 
+    /// Toggle the search mode.
     pub fn toggle_search_mode(self: *View) void {
         var toggle: bool = false;
         switch (self.focus) {
@@ -312,6 +313,7 @@ const View = struct {
         }
     }
 
+    /// Refresh entire TUI.
     pub fn refresh(self: *View) !void {
         self.memView.unload();
         self.info_view.unload();
@@ -516,15 +518,7 @@ pub fn main() !void {
                 }
 
                 if (view.edit_memory_view.is_loaded()) {
-                    const start_x: u16 = @intFromFloat(@as(f32, @floatFromInt(area.width)) * 0.2);
-                    const start_y: u16 = @intFromFloat(@as(f32, @floatFromInt(area.height)) * 0.2);
-                    const edit_memory_area: tui.Rect = .{
-                        .x = start_x,
-                        .y = start_y,
-                        .width = area.width - (start_x * 2),
-                        .height = area.height - (start_y * 2),
-                    };
-                    try view.edit_memory_view.render(edit_memory_area, buf);
+                    try view.edit_memory_view.render(area, buf);
                 }
 
                 // present last to show on top of everything.

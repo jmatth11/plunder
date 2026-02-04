@@ -256,6 +256,7 @@ pub const RegionMemoryView = struct {
             var idx: usize = self.scroll_offset * 16;
             while (offset_area.y < height) : (offset_area.y += 1) {
                 var working_offset = offset_area;
+                const cap_width = working_offset.x + working_offset.width;
                 const base_addr: usize = memory.info.start_addr + memory.starting_offset + idx;
                 const base_addr_str = try std.fmt.allocPrint(
                     arena,
@@ -316,7 +317,7 @@ pub const RegionMemoryView = struct {
 
                 // The character values
                 byte_idx = 0;
-                while (byte_idx < 16) : (byte_idx += 1) {
+                while (byte_idx < 16 and working_offset.x < cap_width) : (byte_idx += 1) {
                     const buffer_idx = idx + byte_idx;
                     if (buffer_idx < buffer.len) {
                         const local_char = buffer[buffer_idx];
@@ -350,12 +351,14 @@ pub const RegionMemoryView = struct {
                         working_offset.x += 1;
                     }
                 }
-                buf.setChar(
-                    working_offset.x,
-                    working_offset.y,
-                    '|',
-                    self.theme.textStyle(),
-                );
+                if (working_offset.x < cap_width) {
+                    buf.setChar(
+                        working_offset.x,
+                        working_offset.y,
+                        '|',
+                        self.theme.textStyle(),
+                    );
+                }
 
                 idx += 16;
             }

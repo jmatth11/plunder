@@ -295,6 +295,19 @@ pub const EditMemoryView = struct {
         return 0;
     }
 
+    fn get_width(self: *EditMemoryView) !u16 {
+        if (self.memory) |memory| {
+            const test_str = try std.fmt.allocPrint(
+                self.alloc,
+                "{X:0>12}: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 |................|",
+                .{memory.info.end_addr},
+            );
+            defer self.alloc.free(test_str);
+            return @intCast(test_str.len);
+        }
+        return 0;
+    }
+
     /// Render edit memory view
     pub fn render(self: *EditMemoryView, area: tui.Rect, buf: *tui.render.Buffer) !void {
         const arena = self.arena.allocator();
@@ -311,8 +324,17 @@ pub const EditMemoryView = struct {
             .border_style = self.theme.borderFocusedStyle(),
             .style = self.theme.baseStyle(),
         };
-        block.render(area, buf);
-        var inner_block = block.inner(area);
+        const max_width = try self.get_width();
+        var block_area = area;
+        if (max_width != 0) {
+            block_area.width = max_width + 3;
+            block_area.y = @intFromFloat(@as(f32, @floatFromInt(area.height)) * 0.2);
+            block_area.height = area.height - (block_area.y * 2);
+            const start_x: u16 = @intFromFloat(@as(f32, @floatFromInt(area.width - block_area.width)) / 2.0);
+            block_area.x = start_x;
+        }
+        block.render(block_area, buf);
+        var inner_block = block.inner(block_area);
         // clear screen
         buf.fillArea(inner_block, ' ', self.theme.baseStyle());
 
