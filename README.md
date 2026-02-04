@@ -23,7 +23,7 @@ This repo is a library and a TUI.
 
 ## TUI Demo
 
-https://github.com/user-attachments/assets/57faa34b-36e7-4405-83db-68965808aad8
+[Plunder Full Video](./references/plunder-full-demo.mp4)
 
 ## Functionality
 
