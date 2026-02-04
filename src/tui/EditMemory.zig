@@ -327,11 +327,17 @@ pub const EditMemoryView = struct {
         const max_width = try self.get_width();
         var block_area = area;
         if (max_width != 0) {
-            block_area.width = max_width + 3;
+            block_area.width = max_width + 4;
             block_area.y = @intFromFloat(@as(f32, @floatFromInt(area.height)) * 0.2);
             block_area.height = area.height - (block_area.y * 2);
             const start_x: u16 = @intFromFloat(@as(f32, @floatFromInt(area.width - block_area.width)) / 2.0);
             block_area.x = start_x;
+        }
+        const max_height = self.get_height() + 5;
+        if (max_height != 0 and block_area.height > max_height) {
+            block_area.height = max_height;
+            const start_y: u16 = @intFromFloat(@as(f32, @floatFromInt(area.height - block_area.height)) / 2.0);
+            block_area.y = start_y;
         }
         block.render(block_area, buf);
         var inner_block = block.inner(block_area);
