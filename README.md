@@ -167,5 +167,3 @@ The `heap_read.zig` file accepts the process ID to read from and searches for
 the test text that is allocated in the `dummy.c` file.
 
 You can run this test with the `run_test.sh` script at the top of the repo.
-
-
